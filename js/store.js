@@ -33,3 +33,5 @@ export function save(){
 
 const OUTROS = {id:'outros', n:'Outros', c:'#94a3b8'};
 export const catOf = id => S.cats.find(c=>c.id===id) || S.cats.find(c=>c.id==='outros') || OUTROS;
+export const cartoesAtivos = () => S.cartoes.filter(k=>!k.arquivado);
+export const cartaoOf = id => S.cartoes.find(k=>k.id===id) || cartoesAtivos()[0] || S.cartoes[0];

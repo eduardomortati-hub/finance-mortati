@@ -1,4 +1,4 @@
-import { S, save, setS, catOf } from './store.js';
+import { S, save, setS, catOf, cartaoOf, cartoesAtivos } from './store.js';
 import { empty } from './model.js';
 import { faturaMonth } from './finance.js';
 import { ui, render } from './views.js';
@@ -10,6 +10,22 @@ function download(texto, nome){
   const blob = new Blob([texto], {type:'application/json'});
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = nome;
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}
+
+// aplica nomes e dias editados na lista de cartões (sem salvar); devolve mensagem de erro ou ''
+const dia = s => { const n = Number(String(s).trim()); return Number.isInteger(n) && n>=1 && n<=31 ? n : null; };
+function lerCartoes(){
+  const novos = [];
+  for(const k of cartoesAtivos()){
+    const n = document.querySelector(`[data-kn="${k.id}"]`), f = document.querySelector(`[data-kf="${k.id}"]`), v = document.querySelector(`[data-kv="${k.id}"]`);
+    if(!n) continue;
+    const nome = n.value.trim().slice(0,40), F = dia(f.value), V = dia(v.value);
+    if(!nome) return 'Dê um nome a cada cartão';
+    if(!F || !V) return `Confira os dias de "${nome}" (de 1 a 31)`;
+    novos.push([k, {nome, fechamento:F, vencimento:V}]);
+  }
+  novos.forEach(([k, d])=>Object.assign(k, d));
+  return '';
 }
 
 // aplica nomes e cores editados na lista de categorias (sem salvar)
@@ -28,6 +44,7 @@ export const A = {
   dCat(d){ ui.draft.cat=d.id; keepDraft(); },
   dMeio(d){ ui.draft.meio=d.id; if(d.id!=='cartao') ui.draft.parcelado=false; keepDraft(); },
   dParc(d){ ui.draft.parcelado = d.v==='1'; keepDraft(); },
+  dCartao(d){ ui.draft.cartao=d.id; keepDraft(); },
 
   saveG(){
     const v = parseNum($('#gValor').value);
@@ -38,7 +55,10 @@ export const A = {
     if(ui.editG){
       const lista = ui.editG.k==='gasto' ? S.gastos : S.entradas;
       const x = lista.find(i=>i.id===ui.editG.id);
-      if(x){ Object.assign(x, {valor:round2(v), data, desc}); if(ui.editG.k==='gasto') Object.assign(x, {cat:d.cat, meio:d.meio}); }
+      if(x){
+        Object.assign(x, {valor:round2(v), data, desc});
+        if(ui.editG.k==='gasto'){ Object.assign(x, {cat:d.cat, meio:d.meio}); if(d.meio==='cartao') x.cartao = d.cartao; else delete x.cartao; }
+      }
       ui.editG = null; ui.tab = 'inicio';
       save(); toast('Alterações salvas ✓');
     } else if(d.tipo==='entrada'){
@@ -47,10 +67,12 @@ export const A = {
     } else if(d.meio==='cartao' && d.parcelado){
       const n = parseInt($('#gParc')?.value,10);
       if(!(n>=2)) return toast('Informe o número de parcelas');
-      S.recorrentes.push({id:uid(), nome:desc||catOf(d.cat).n, valor:round2(v/n), tipo:'parcela', parcelas:n, meio:'cartao', inicio:faturaMonth(data), cat:d.cat});
+      S.recorrentes.push({id:uid(), nome:desc||catOf(d.cat).n, valor:round2(v/n), tipo:'parcela', parcelas:n, meio:'cartao', cartao:d.cartao, inicio:faturaMonth(data, cartaoOf(d.cartao)), cat:d.cat});
       save(); toast(`Parcelado em ${n}x de ${fmt(v/n)} — está em Fixos`);
     } else {
-      S.gastos.push({id:uid(), data, valor:round2(v), cat:d.cat, meio:d.meio, desc, criado:Date.now()});
+      const g = {id:uid(), data, valor:round2(v), cat:d.cat, meio:d.meio, desc, criado:Date.now()};
+      if(d.meio==='cartao') g.cartao = d.cartao;
+      S.gastos.push(g);
       save(); toast('Gasto salvo ✓');
     }
     d.parcelado = false;
@@ -59,7 +81,7 @@ export const A = {
   editL(d){
     const x = (d.k==='gasto' ? S.gastos : S.entradas).find(i=>i.id===d.id); if(!x) return;
     ui.editG = {k:d.k, id:d.id};
-    if(d.k==='gasto'){ ui.draft.cat = x.cat; ui.draft.meio = x.meio; }
+    if(d.k==='gasto'){ ui.draft.cat = x.cat; ui.draft.meio = x.meio; if(x.cartao) ui.draft.cartao = x.cartao; }
     ui.tab = 'lancar'; render();
   },
   cancelG(){ ui.editG=null; ui.tab='inicio'; render(); },
@@ -71,6 +93,7 @@ export const A = {
   repG(d){
     const g = S.gastos.find(x=>x.id===d.id); if(!g) return;
     Object.assign(ui.draft, {tipo:'gasto', cat:g.cat, meio:g.meio, parcelado:false});
+    if(g.cartao && cartoesAtivos().some(k=>k.id===g.cartao)) ui.draft.cartao = g.cartao;
     render();
     $('#gValor').value = valIn(g.valor); $('#gDesc').value = g.desc;
     toast('Confira a data e toque em Salvar');
@@ -87,6 +110,7 @@ export const A = {
     if(fim && diffM(inicio, fim) < 0) return toast('O último mês não pode ser antes do início');
     const obj = {nome, valor:round2(valor), tipo, meio:$('#rMeio').value, inicio, cat:$('#rCat').value};
     if(tipo==='parcela') obj.parcelas = parcelas;
+    if(obj.meio==='cartao') obj.cartao = $('#rCartao')?.value || (ui.editId && S.recorrentes.find(x=>x.id===ui.editId)?.cartao) || cartoesAtivos()[0].id;
     const r = ui.editId && S.recorrentes.find(x=>x.id===ui.editId);
     const vig = $('#rVig')?.value;
     if(r && r.tipo==='fixo' && tipo==='fixo' && obj.valor!==r.valor && vig && diffM(inicio, vig) > 0){
@@ -97,7 +121,7 @@ export const A = {
       S.recorrentes.push(novo);
       toast(`Reajuste salvo: ${fmt(obj.valor)} a partir de ${mLabel(vig)}`);
     } else if(r){
-      Object.assign(r, obj); if(tipo==='fixo') delete r.parcelas;
+      Object.assign(r, obj); if(tipo==='fixo') delete r.parcelas; if(obj.meio!=='cartao') delete r.cartao;
       if(fim) r.fim = fim; else delete r.fim;
       toast('Salvo ✓');
     } else {
@@ -169,9 +193,38 @@ export const A = {
   },
 
   saveCfg(){
-    const r=parseNum($('#cRenda').value||'0'), f=parseInt($('#cFech').value,10), v=parseInt($('#cVenc').value,10);
-    if(!(r>=0)||!(f>=1&&f<=31)||!(v>=1&&v<=31)) return toast('Confira os valores');
-    Object.assign(S.config,{renda:round2(r),fechamento:f,vencimento:v,configurado:true}); save(); toast('Ajustes salvos ✓');
+    const r=parseNum($('#cRenda').value||'0');
+    if(!(r>=0)) return toast('Confira o valor da renda');
+    Object.assign(S.config,{renda:round2(r), configurado:true}); save(); toast('Renda salva ✓');
+  },
+
+  saveCartoes(){
+    const erro = lerCartoes(); if(erro) return toast(erro);
+    S.config.configurado = true; save(); toast('Cartões salvos ✓'); render();
+  },
+  addCartao(){
+    const nome = $('#nKn').value.trim().slice(0,40), F = dia($('#nKf').value), V = dia($('#nKv').value);
+    if(!nome) return toast('Digite o nome do cartão');
+    if(!F || !V) return toast('Informe os dias de fechamento e vencimento (de 1 a 31)');
+    const erro = lerCartoes(); if(erro) return toast(erro);
+    S.cartoes.push({id:'k'+uid(), nome, fechamento:F, vencimento:V});
+    S.config.configurado = true; save(); toast('Cartão adicionado ✓'); render();
+  },
+  // remover: com lançamentos, o cartão só sai das opções e continua nas faturas passadas e nas parcelas em andamento
+  delCartao(d){
+    const k = S.cartoes.find(x=>x.id===d.id); if(!k) return;
+    if(cartoesAtivos().length<=1) return toast('Precisa ter pelo menos um cartão');
+    const usos = S.gastos.filter(g=>g.cartao===k.id).length + S.recorrentes.filter(r=>r.cartao===k.id).length;
+    if(usos){
+      if(!confirm(`Remover o cartão "${k.nome}"?\n\nEle sai das opções, mas os ${usos} lançamento(s) e parcelas dele continuam nas faturas.`)) return;
+      k.arquivado = true;
+    } else {
+      if(!confirm(`Remover o cartão "${k.nome}"?`)) return;
+      S.cartoes = S.cartoes.filter(x=>x.id!==k.id);
+    }
+    const erro = lerCartoes(); if(erro) return toast(erro);
+    if(ui.draft.cartao===k.id) ui.draft.cartao = null;
+    save(); toast('Cartão removido'); render();
   },
   async export(){
     const r = await ask({titulo:'Exportar backup',

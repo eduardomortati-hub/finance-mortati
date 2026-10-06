@@ -1,11 +1,11 @@
 // Importação de backup (JSON) e de fatura (CSV). Os arquivos são lidos só no aparelho.
 import { RULES } from './config.js';
-import { S, save, setS } from './store.js';
+import { S, save, setS, cartoesAtivos } from './store.js';
 import { normalize } from './model.js';
 import { ehCifrado, decifrar } from './crypto.js';
 import { ask } from './modal.js';
 import { ui, render } from './views.js';
-import { $, uid, fmt, round2, parseNum, sum, todayISO, toast } from './util.js';
+import { $, uid, esc, fmt, round2, parseNum, sum, todayISO, toast } from './util.js';
 
 export function initImports(){
   $('#fileJson').addEventListener('change', async e=>{
@@ -74,9 +74,16 @@ export function initImports(){
     }
     if(!novos.length) return toast(ignor||creditos?'Nada novo — tudo já estava lançado ou era estorno/pagamento':'Não reconheci lançamentos nesse arquivo');
     const tot=sum(novos);
-    if(!confirm(`Encontrei ${novos.length} lançamentos (${fmt(tot)}).\n${ignor} linhas ignoradas (repetidas/pagamentos).`
-      + (creditos ? `\n${creditos} estornos/créditos ignorados (não são gastos).` : '')
-      + `\n\nImportar como compras no cartão?`)) return;
+    const resumo = `Encontrei ${novos.length} lançamentos (${fmt(tot)}).\n${ignor} linhas ignoradas (repetidas/pagamentos).`
+      + (creditos ? `\n${creditos} estornos/créditos ignorados (não são gastos).` : '');
+    const ativos = cartoesAtivos();
+    let cartao = ativos[0].id;
+    if(ativos.length>1){
+      const r = await ask({titulo:'De qual cartão é essa fatura?', texto:esc(resumo).replace(/\n/g,'<br>'), botoes:ativos.map(k=>({id:k.id, rotulo:k.nome}))});
+      if(!r) return;
+      cartao = r.botao;
+    } else if(!confirm(resumo + `\n\nImportar como compras no cartão?`)) return;
+    novos.forEach(g=>{ g.cartao = cartao; });
     S.gastos.push(...novos); save(); toast(`${novos.length} lançamentos importados ✓`); ui.tab='inicio'; render();
   });
 }

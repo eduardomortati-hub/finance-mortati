@@ -82,3 +82,11 @@ dialog h2{font-size:17px;margin-bottom:4px}
 dialog .btn{margin-top:10px}
 dialog .btn:first-of-type{margin-top:16px}
 .dlg-erro{margin-top:10px}
+.cartao{padding:10px 0;border-bottom:1px solid var(--line)}
+.cartao:first-of-type{padding-top:0}
+.cartao:last-child{border-bottom:0;padding-bottom:0}
+.cartao .top{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:2px}
+.cartao .tag{margin-left:0}
+.cartao .note{margin-top:6px}
+.cartao-ed{padding:10px 0;border-bottom:1px dashed var(--line)}
+.cartao-ed label{margin-top:8px}

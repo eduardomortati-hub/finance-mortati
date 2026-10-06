@@ -1,6 +1,6 @@
 import { MEIOS, meioOf } from './config.js';
-import { S, catOf } from './store.js';
-import { calc, recInMonth, faturaPeriodo } from './finance.js';
+import { S, catOf, cartaoOf, cartoesAtivos } from './store.js';
+import { calc, recInMonth, faturaPeriodo, vencimentoData, infoCartao } from './finance.js';
 import { $, esc, fmt, todayISO, thisMonth, addM, diffM, mLabel, dLabel, sum, normTxt, diasEntre, addDias, valIn } from './util.js';
 
 // estado da interface (não é salvo)
@@ -11,6 +11,9 @@ const ymBR = k => mLabel(k,true)+'/'+k.slice(2,4);
 const dot = c => `<span class="dot" style="background:${c}"></span>`;
 const chip = (on, act, id, txt) => `<button class="chip ${on?'on':''}" aria-pressed="${on}" data-act="${act}" data-id="${esc(id)}">${txt}</button>`;
 const banner = t => `<div class="banner" style="margin-bottom:12px">${t}</div>`;
+const emDias = n => n===0 ? 'hoje' : n===1 ? 'amanhã' : `em ${n} dias`;
+// meio de pagamento para exibir: com mais de um cartão, mostra o nome do cartão
+export const meioLabel = x => x.meio==='cartao' && S.cartoes.length>1 ? cartaoOf(x.cartao).nome : meioOf(x.meio);
 
 let lastTab = null;
 export function render(){
@@ -37,16 +40,39 @@ export const diasSemBackup = () => S.config.ultimoBackup ? diasEntre(S.config.ul
 function avisos(){
   let h = '';
   if(isIOS() && !instalado()) h += banner(`<b>Instale o app no iPhone:</b> toque em Compartilhar → <b>Adicionar à Tela de Início</b>. Aberto só no Safari, o iPhone pode apagar seus dados depois de 7 dias sem uso.`);
-  if(!S.config.configurado) h += banner(`Antes de tudo: confira sua renda e o <b>dia de fechamento e vencimento</b> da fatura. <a data-act="tab" data-t="ajustes">Ir para Ajustes →</a>`);
+  if(!S.config.configurado) h += banner(`Antes de tudo: confira sua renda e seus <b>cartões</b> (dia de fechamento e de vencimento). <a data-act="tab" data-t="ajustes">Ir para Ajustes →</a>`);
   const d = diasSemBackup();
   if(temDados() && (d===null || d>=15)) h += banner(`${d===null ? 'Você ainda não fez nenhum backup.' : `Seu último backup foi há ${d} dias.`} Seus dados existem só neste aparelho. <a data-act="export">Fazer backup agora →</a>`);
   return h;
 }
 
 /* ---------- Início ---------- */
+const periodoTxt = k => { const p = faturaPeriodo(ui.mes, k); return `Compras de ${dLabel(p.ini)} a ${dLabel(p.fim)}`; };
+const linhaFatura = x => `<div class="row"><span class="l">${esc(x.cartao.nome)} <span class="tag">vence ${dLabel(vencimentoData(ui.mes, x.cartao))}</span><br><span class="mut sm">${periodoTxt(x.cartao).toLowerCase()}</span></span><b>${fmt(x.total)}</b></div>`;
+
+// situação de cada cartão hoje: o que vence, o que está aberto e o melhor dia de compra
+function vCartoesHoje(){
+  const hoje = todayISO();
+  const blocos = cartoesAtivos().map(k=>{
+    const i = infoCartao(k, hoje);
+    let h = `<div class="cartao"><div class="top"><b>${esc(k.nome)}</b><span class="tag">fecha dia ${k.fechamento} · vence dia ${k.vencimento}</span></div>`;
+    if(i.prox!==i.aberta) h += `<div class="row"><span class="l">Fatura fechada<br><span class="mut sm">vence ${dLabel(i.proxVence)} (${emDias(i.diasProx)})</span></span><b>${fmt(i.valorProx)}</b></div>`;
+    h += `<div class="row"><span class="l">Fatura aberta<br><span class="mut sm">fecha ${dLabel(i.fechaEm)} (${emDias(i.diasFecha)}) · vence ${dLabel(i.pagaHoje)} (${emDias(i.diasHoje)})</span></span><b>${fmt(i.valorAberta)}</b></div>`;
+    h += i.hojeEhMelhor
+      ? `<p class="note"><b class="pos">Hoje é o melhor dia de compra.</b> O que comprar hoje só vence em ${dLabel(i.pagaHoje)}: ${i.diasHoje} dias para pagar.</p>`
+      : `<p class="note">Comprando hoje, paga em ${dLabel(i.pagaHoje)} (${i.diasHoje} dias). <b>Melhor dia de compra: dia ${k.fechamento}</b>. Comprando em ${dLabel(i.melhorDia)}, paga só em ${dLabel(i.pagaMelhor)} (${i.diasMelhor} dias).</p>`;
+    return h + '</div>';
+  });
+  return `<div class="card" style="margin-bottom:12px"><h2>${blocos.length>1 ? 'Seus cartões hoje' : 'Seu cartão hoje'}</h2>${blocos.join('')}</div>`;
+}
+
 function vInicio(){
-  const c = calc(ui.mes), per = faturaPeriodo(ui.mes), receita = c.renda + c.entradas;
+  const c = calc(ui.mes), receita = c.renda + c.entradas;
+  const um = S.cartoes.length===1 ? S.cartoes[0] : null;
+  // na fatura do mês aparecem os cartões ativos e os removidos que ainda têm valor (parcelas em andamento)
+  const faturas = c.porCartao.filter(x=>!x.cartao.arquivado || x.total);
   let h = avisos();
+  if(ui.mes===thisMonth()) h += vCartoesHoje();
   h += `<div class="grid two">
     <div class="card">
       <h2>Sobra prevista no mês</h2>
@@ -54,19 +80,20 @@ function vInicio(){
       <div style="margin-top:10px">
         <div class="row"><span class="l">Renda fixa</span><b>${fmt(c.renda)}</b></div>
         ${c.entradas || !c.renda ? `<div class="row"><span class="l">Entradas do mês</span><b class="pos">+ ${fmt(c.entradas)}</b></div>` : ''}
-        <div class="row"><span class="l">Fatura do cartão <span class="tag">vence dia ${esc(S.config.vencimento)}</span></span><b class="neg">− ${fmt(c.fatura)}</b></div>
+        <div class="row"><span class="l">${um ? `Fatura do cartão <span class="tag">vence dia ${um.vencimento}</span>` : 'Faturas dos cartões'}</span><b class="neg">− ${fmt(c.fatura)}</b></div>
         <div class="row"><span class="l">Fixos fora do cartão</span><b class="neg">− ${fmt(c.fixosFora)}</b></div>
         <div class="row"><span class="l">Pix / débito / dinheiro</span><b class="neg">− ${fmt(c.avulsos)}</b></div>
         ${c.guardado ? `<div class="row"><span class="l">${c.guardado>0?'Guardado em metas':'Retirado de metas'}</span><b class="${c.guardado>0?'neg':'pos'}">${c.guardado>0?'−':'+'} ${fmt(Math.abs(c.guardado))}</b></div>` : ''}
       </div>
     </div>
     <div class="card">
-      <h2>Fatura que vence neste mês</h2>
+      <h2>${um ? 'Fatura que vence neste mês' : 'Faturas que vencem neste mês'}</h2>
       <div class="big">${fmt(c.fatura)}</div>
       <div style="margin-top:10px">
+        ${um ? '' : faturas.map(linhaFatura).join('')}
         <div class="row"><span class="l">Parcelas e fixos no cartão</span><b>${fmt(c.faturaFixos)}</b></div>
         <div class="row"><span class="l">Compras lançadas</span><b>${fmt(c.faturaCompras)}</b></div>
-        <div class="row"><span class="l mut sm">Compras de ${dLabel(per.ini)} a ${dLabel(per.fim)} caem nesta fatura</span></div>
+        ${um ? `<div class="row"><span class="l mut sm">${periodoTxt(um)} caem nesta fatura</span></div>` : ''}
       </div>
       ${receita ? `<div class="bar" style="margin-top:8px"><i style="width:${Math.min(100,c.fatura/receita*100)}%;background:${c.fatura/receita>.8?'var(--red)':c.fatura/receita>.6?'var(--amb)':'var(--acc)'}"></i></div><p class="note">${Math.round(c.fatura/receita*100)}% da renda vai para o cartão</p>` : ''}
     </div>
@@ -118,7 +145,7 @@ export function renderLista(){
   else itens = itens.filter(({k,x})=>{
     if(meio==='entrada' ? k!=='entrada' : meio && (k!=='gasto' || x.meio!==meio)) return false;
     if(cat && (k!=='gasto' || x.cat!==cat)) return false;
-    if(nq){ const txt = k==='gasto' ? x.desc+' '+catOf(x.cat).n+' '+meioOf(x.meio) : x.desc+' entrada'; if(!normTxt(txt).includes(nq)) return false; }
+    if(nq){ const txt = k==='gasto' ? x.desc+' '+catOf(x.cat).n+' '+meioLabel(x) : x.desc+' entrada'; if(!normTxt(txt).includes(nq)) return false; }
     return true;
   });
   itens.sort((a,b)=>b.x.data.localeCompare(a.x.data) || b.x.criado-a.x.criado);
@@ -132,7 +159,7 @@ export function renderLista(){
   itens.slice(0, MAX_LISTA).forEach(({k,x})=>{
     const data = filtrando ? dLabel(x.data)+'/'+x.data.slice(2,4) : dLabel(x.data);
     const btns = `<button class="x" data-act="editL" data-k="${k}" data-id="${esc(x.id)}" aria-label="Editar">✎</button><button class="x" data-act="delL" data-k="${k}" data-id="${esc(x.id)}" aria-label="Apagar">×</button>`;
-    if(k==='gasto'){ const ct = catOf(x.cat); h += `<div class="row"><span class="l">${dot(ct.c)}${esc(x.desc||ct.n)} <span class="mut sm">· ${data} · ${esc(meioOf(x.meio))}</span></span><span style="white-space:nowrap"><b>${fmt(x.valor)}</b>${btns}</span></div>`; }
+    if(k==='gasto'){ const ct = catOf(x.cat); h += `<div class="row"><span class="l">${dot(ct.c)}${esc(x.desc||ct.n)} <span class="mut sm">· ${data} · ${esc(meioLabel(x))}</span></span><span style="white-space:nowrap"><b>${fmt(x.valor)}</b>${btns}</span></div>`; }
     else h += `<div class="row"><span class="l">${dot('var(--acc)')}${esc(x.desc||'Entrada')} <span class="mut sm">· ${data} · entrada</span></span><span style="white-space:nowrap"><b class="pos">+ ${fmt(x.valor)}</b>${btns}</span></div>`;
   });
   if(itens.length > MAX_LISTA) h += `<p class="note">Mostrando ${MAX_LISTA} de ${itens.length}. Refine a busca.</p>`;
@@ -145,6 +172,11 @@ function catsOrdenadas(){
   const desde = addDias(todayISO(), -90), cont = {};
   S.gastos.forEach(g=>{ if(g.data >= desde) cont[g.cat] = (cont[g.cat]||0) + 1; });
   return S.cats.map((c,i)=>({c, i, n:cont[c.id]||0})).sort((a,b)=>b.n-a.n || a.i-b.i).map(x=>x.c);
+}
+// cartão do gasto mais recente feito no cartão (para já vir selecionado)
+function ultimoCartao(){
+  const g = S.gastos.filter(g=>g.meio==='cartao' && cartoesAtivos().some(k=>k.id===g.cartao)).sort((a,b)=>b.criado-a.criado)[0];
+  return g?.cartao;
 }
 // últimos gastos diferentes entre si, para repetir com um toque
 function recentes(){
@@ -165,6 +197,8 @@ function vLancar(){
   const tipo = ed ? ui.editG.k : d.tipo;
   const cats = catsOrdenadas();
   if(!S.cats.some(c=>c.id===d.cat)) d.cat = cats[0].id;
+  const ativos = cartoesAtivos();
+  if(!S.cartoes.some(k=>k.id===d.cartao) || (!ed && !ativos.some(k=>k.id===d.cartao))) d.cartao = ultimoCartao() || ativos[0].id;
   let h = `<div class="card">`;
   if(!ed) h += `<div class="chips" style="margin-bottom:14px"><button class="chip ${tipo==='gasto'?'on':''}" aria-pressed="${tipo==='gasto'}" data-act="dTipo" data-v="gasto">Gasto</button><button class="chip ${tipo==='entrada'?'on':''}" aria-pressed="${tipo==='entrada'}" data-act="dTipo" data-v="entrada">Entrada</button></div>`;
   h += `<h2>${ed ? (tipo==='gasto'?'Editar gasto':'Editar entrada') : (tipo==='gasto'?'Novo gasto':'Nova entrada')}</h2>
@@ -172,6 +206,10 @@ function vLancar(){
   if(tipo==='gasto'){
     h += `<label>Categoria</label><div class="chips">${cats.map(c=>chip(d.cat===c.id, 'dCat', c.id, esc(c.n))).join('')}</div>
       <label>Pagou com</label><div class="chips">${MEIOS.filter(m=>m.id!=='boleto').map(m=>chip(d.meio===m.id, 'dMeio', m.id, m.n)).join('')}</div>`;
+    if(d.meio==='cartao' && ativos.length>1){
+      const opcoes = ativos.some(k=>k.id===d.cartao) ? ativos : [...ativos, cartaoOf(d.cartao)];   // editando gasto de cartão removido
+      h += `<label>Qual cartão?</label><div class="chips">${opcoes.map(k=>chip(d.cartao===k.id, 'dCartao', k.id, esc(k.nome))).join('')}</div>`;
+    }
     if(!ed && d.meio==='cartao'){
       h += `<label>Parcelado?</label><div class="chips"><button class="chip ${!d.parcelado?'on':''}" aria-pressed="${!d.parcelado}" data-act="dParc" data-v="0">À vista</button><button class="chip ${d.parcelado?'on':''}" aria-pressed="${d.parcelado}" data-act="dParc" data-v="1">Parcelado</button></div>`;
       if(d.parcelado) h += `<label for="gParc">Número de parcelas (o valor acima é o total)</label><input id="gParc" inputmode="numeric" placeholder="ex: 6">`;
@@ -199,7 +237,7 @@ function vFixos(){
   const fix = ativos.filter(r=>r.tipo==='fixo'), par = ativos.filter(r=>r.tipo==='parcela');
   const line = r => {
     const ct = catOf(r.cat);
-    let sub = esc(meioOf(r.meio));
+    let sub = esc(meioLabel(r));
     // último mês efetivo: fim das parcelas ou data de encerramento, o que vier antes
     let ult = r.tipo==='parcela' ? addM(r.inicio, r.parcelas-1) : null;
     if(r.fim && (!ult || diffM(r.fim, ult) > 0)) ult = r.fim;
@@ -240,6 +278,7 @@ function vFixos(){
       <div><label for="rParc">Nº de parcelas (se parcelado)</label><input id="rParc" inputmode="numeric" value="${e?.parcelas||''}" placeholder="ex: 10"></div>
       <div><label for="rIni">1ª fatura / 1º pagamento</label><input id="rIni" type="month" value="${e?.inicio||hoje}"></div>
       <div><label for="rMeio">Pago com</label><select id="rMeio">${MEIOS.map(m=>`<option value="${m.id}" ${(e?.meio||'cartao')===m.id?'selected':''}>${m.n}</option>`).join('')}</select></div>
+      ${S.cartoes.length>1 ? `<div><label for="rCartao">Cartão (se pago no cartão)</label><select id="rCartao">${S.cartoes.filter(k=>!k.arquivado || k.id===e?.cartao).map(k=>`<option value="${esc(k.id)}" ${e?.cartao===k.id?'selected':''}>${esc(k.nome)}</option>`).join('')}</select></div>` : ''}
       <div><label for="rCat">Categoria</label><select id="rCat">${S.cats.map(c=>`<option value="${esc(c.id)}" ${(e?.cat||'outros')===c.id?'selected':''}>${esc(c.n)}</option>`).join('')}</select></div>
       <div><label for="rFim">Último mês (opcional)</label><input id="rFim" type="month" value="${e?.fim||''}"></div>
       ${e && e.tipo==='fixo' ? `<div><label for="rVig">Se mudou o valor, vale a partir de</label><input id="rVig" type="month" value="${hoje}"></div>` : ''}
@@ -276,18 +315,28 @@ function vMetas(){
 }
 
 /* ---------- Ajustes ---------- */
+const diasCartao = (af, av, k) => `<div class="two-in"><div><label>Dia de fechamento</label><input ${af} inputmode="numeric" value="${k?.fechamento ?? ''}" placeholder="ex: 5"></div><div><label>Dia de vencimento</label><input ${av} inputmode="numeric" value="${k?.vencimento ?? ''}" placeholder="ex: 12"></div></div>`;
+function vCartoesAjustes(){
+  const ativos = cartoesAtivos(), removidos = S.cartoes.filter(k=>k.arquivado);
+  return `<div class="card" style="margin-top:12px"><h2>Cartões</h2>
+    <p class="note" style="margin:0 0 4px">Os dias de fechamento e vencimento estão no app do banco, na tela da fatura. Eles decidem em qual fatura cada compra cai e qual é o melhor dia de compra.</p>
+    ${ativos.map(k=>`<div class="cartao-ed"><div class="row catrow"><input data-kn="${esc(k.id)}" value="${esc(k.nome)}" maxlength="40" aria-label="Nome do cartão">${ativos.length>1 ? `<button class="x" data-act="delCartao" data-id="${esc(k.id)}" aria-label="Remover cartão ${esc(k.nome)}">×</button>` : ''}</div>${diasCartao(`data-kf="${esc(k.id)}"`, `data-kv="${esc(k.id)}"`, k)}</div>`).join('')}
+    <button class="btn" data-act="saveCartoes">Salvar cartões</button>
+    <div class="cartao-ed" style="margin-top:16px"><label for="nKn">Adicionar cartão</label><input id="nKn" maxlength="40" placeholder="ex: Nubank, Inter, Itaú…">${diasCartao('id="nKf"', 'id="nKv"', null)}</div>
+    <button class="btn sec" data-act="addCartao">Adicionar cartão</button>
+    ${removidos.length ? `<p class="note">Removidos (continuam nas faturas passadas): ${removidos.map(k=>esc(k.nome)).join(', ')}.</p>` : ''}
+  </div>`;
+}
+
 function vAjustes(){
   const c = S.config, d = diasSemBackup();
   const ultimo = d===null ? 'Nenhum backup feito ainda.' : `Último backup: ${dLabel(c.ultimoBackup)}/${c.ultimoBackup.slice(0,4)} (${d===0?'hoje':d===1?'ontem':`há ${d} dias`}).`;
-  return `<div class="card"><h2>Renda e cartão</h2>
+  return `<div class="card"><h2>Renda</h2>
     <label for="cRenda">Renda fixa mensal (salário, pró-labore)</label><input id="cRenda" inputmode="decimal" value="${valIn(c.renda)||'0'}">
     <p class="note">Recebe valores que mudam todo mês (MEI, freelas, extras)? Lance cada recebimento como <b>Entrada</b> no botão +. Se toda a sua renda varia, deixe 0 aqui.</p>
-    <div class="two-in">
-      <div><label for="cFech">Dia de fechamento da fatura</label><input id="cFech" inputmode="numeric" value="${c.fechamento}"></div>
-      <div><label for="cVenc">Dia de vencimento</label><input id="cVenc" inputmode="numeric" value="${c.vencimento}"></div>
-    </div>
-    <p class="note">Esses dias estão no app do banco, na tela da fatura. Eles decidem em qual fatura cada compra cai.</p>
     <button class="btn" data-act="saveCfg">Salvar</button></div>
+
+  ${vCartoesAjustes()}
 
   <div class="card" style="margin-top:12px"><h2>Categorias</h2>
     <p class="note" style="margin:0 0 6px">Mude nome e cor, apague ou crie categorias. Ao apagar, os lançamentos dela vão para "Outros".</p>

@@ -39,7 +39,7 @@ const iso = (dDias=0) => { const x = new Date(now.getFullYear(), now.getMonth(),
 const brl = v => v.toLocaleString('pt-BR', {style:'currency', currency:'BRL'});
 
 function estado(extra={}){
-  return {v:2, config:{renda:1000, fechamento:5, vencimento:12, configurado:true, ultimoBackup:iso(0)},
+  return {v:3, config:{renda:1000, configurado:true, ultimoBackup:iso(0)}, cartoes:[{id:'k1', nome:'Nubank', fechamento:5, vencimento:12}],
     cats:[{id:'mercado',n:'Mercado',c:'#22c55e'},{id:'saude',n:'Saúde',c:'#14b8a6'},{id:'delivery',n:'Delivery',c:'#ef4444'},{id:'outros',n:'Outros',c:'#94a3b8'}],
     gastos:[], entradas:[], recorrentes:[], metas:[], limites:{}, ...extra};
 }
@@ -74,12 +74,19 @@ test('começa vazio, sem dados de exemplo', async()=>{
 
 test('migra dados da versão 1 e guarda uma cópia do original', async()=>{
   const v1 = {v:1, config:{renda:3000, fechamento:3, vencimento:10, configurado:true},
-    gastos:[{id:'g1', data:iso(0), valor:50, cat:'mercado', meio:'pix', desc:'x', criado:1}],
-    recorrentes:[{id:'r1', nome:'Academia', valor:100, tipo:'fixo', meio:'pix', inicio:ym(-2), cat:'saude'}],
+    gastos:[{id:'g1', data:iso(0), valor:50, cat:'mercado', meio:'pix', desc:'x', criado:1},
+            {id:'g2', data:iso(0), valor:70, cat:'mercado', meio:'cartao', desc:'y', criado:2}],
+    recorrentes:[{id:'r1', nome:'Academia', valor:100, tipo:'fixo', meio:'pix', inicio:ym(-2), cat:'saude'},
+                 {id:'r2', nome:'TV', valor:200, tipo:'parcela', parcelas:5, meio:'cartao', inicio:ym(-1), cat:'compras'}],
     metas:[{id:'m1', nome:'Reserva', alvo:1000, atual:200}], limites:{mercado:300}};
   const {page, ctx, errors} = await abrir(v1);
   const s = await lerEstado(page);
-  assert.equal(s.v, 2);
+  assert.equal(s.v, 3);
+  assert.deepEqual(s.cartoes, [{id:'cartao1', nome:'Meu cartão', fechamento:3, vencimento:10}], 'cartão vem do config antigo');
+  assert.equal(s.config.fechamento, undefined);
+  assert.equal(s.gastos[0].cartao, undefined, 'pix não tem cartão');
+  assert.equal(s.gastos[1].cartao, 'cartao1');
+  assert.equal(s.recorrentes[1].cartao, 'cartao1');
   assert.ok(s.cats.length >= 12, 'categorias padrão');
   assert.deepEqual(s.entradas, []);
   assert.deepEqual(s.metas[0].movs, []);
@@ -95,19 +102,23 @@ test('migra dados da versão 1 e guarda uma cópia do original', async()=>{
 test('período da fatura bate com a fatura de cada compra, inclusive fechamento no dia 1 e 31', async()=>{
   const {page, ctx} = await abrir(estado());
   const erros = await page.evaluate(async()=>{
-    const {S} = await import('./js/store.js'); const {faturaMonth, faturaPeriodo} = await import('./js/finance.js');
+    const {faturaMonth, faturaPeriodo, infoCartao} = await import('./js/finance.js'); const {addDias, addM} = await import('./js/util.js');
     const out = [];
     for(const [F,V] of [[1,10],[5,12],[25,5],[31,10],[28,28],[30,2]]){
-      S.config.fechamento = F; S.config.vencimento = V;
+      const c = {id:'x', nome:'x', fechamento:F, vencimento:V};
       for(let t = Date.UTC(2025,0,1); t < Date.UTC(2027,0,1); t += 864e5){
-        const d = new Date(t).toISOString().slice(0,10), k = faturaMonth(d), p = faturaPeriodo(k);
+        const d = new Date(t).toISOString().slice(0,10), k = faturaMonth(d, c), p = faturaPeriodo(k, c);
         if(d < p.ini || d > p.fim) out.push(`F${F} V${V} ${d} -> ${k} [${p.ini}..${p.fim}]`);
+        // o "melhor dia" é o primeiro que já cai na fatura seguinte, e o vencimento nunca vem antes da compra
+        const i = infoCartao(c, d);
+        if(faturaMonth(i.melhorDia, c)!==addM(i.aberta,1) || faturaMonth(addDias(i.melhorDia,-1), c)!==i.aberta) out.push(`melhor dia F${F} V${V} ${d}`);
+        if(i.pagaHoje < d || i.proxVence < d) out.push(`datas F${F} V${V} ${d}`);
       }
     }
     return out;
   });
   assert.deepEqual(erros.slice(0,5), []);
-  await page.evaluate(async()=>{ const {S, save} = await import('./js/store.js'); S.config.fechamento = 1; save(); });
+  await page.evaluate(async()=>{ const {S, save} = await import('./js/store.js'); S.cartoes[0].fechamento = 1; save(); });
   await page.reload(); await page.waitForSelector('#view .card');
   assert.doesNotMatch(await page.textContent('#view'), /dia 0/);
   await ctx.close();
@@ -392,5 +403,92 @@ test('PWA: todos os arquivos no cache, abre offline e oferece atualização', as
     assert.deepEqual(await page.evaluate(()=>caches.keys()), ['meucaixa-teste-nova']);
     assert.equal((await lerEstado(page)).gastos.length, 1);
   } finally { swOverride = null; }
+  await ctx.close();
+});
+
+test('cartão hoje: próximo vencimento, fatura aberta e melhor dia de compra', async()=>{
+  const {page, ctx} = await abrir(estado());
+  const r = await page.evaluate(async()=>{
+    const {infoCartao} = await import('./js/finance.js');
+    const c = {id:'x', nome:'x', fechamento:5, vencimento:12};
+    return [infoCartao(c, '2026-10-06'), infoCartao(c, '2026-10-05'), infoCartao(c, '2026-10-03'), infoCartao({...c, fechamento:25, vencimento:5}, '2026-10-06')];
+  });
+  // dia 6/10, fecha dia 5 e vence dia 12: a fatura de outubro já fechou e vence 12/10; o que comprar hoje vence 12/11
+  assert.equal(r[0].proxVence, '2026-10-12'); assert.equal(r[0].diasProx, 6);
+  assert.equal(r[0].aberta, '2026-11'); assert.equal(r[0].fechaEm, '2026-11-05');
+  assert.equal(r[0].pagaHoje, '2026-11-12'); assert.equal(r[0].diasHoje, 37);
+  assert.equal(r[0].melhorDia, '2026-11-05'); assert.equal(r[0].pagaMelhor, '2026-12-12'); assert.equal(r[0].hojeEhMelhor, false);
+  assert.equal(r[1].hojeEhMelhor, true, 'no dia do fechamento é o melhor dia');
+  assert.equal(r[1].pagaHoje, '2026-11-12'); assert.equal(r[1].diasHoje, 38);
+  assert.equal(r[2].prox, r[2].aberta, 'antes do fechamento a fatura do mês ainda está aberta');
+  assert.equal(r[2].fechaEm, '2026-10-05'); assert.equal(r[2].pagaHoje, '2026-10-12');
+  assert.equal(r[3].pagaHoje, '2026-11-05', 'vencimento antes do fechamento: vence no mês seguinte');
+  assert.equal(r[3].fechaEm, '2026-10-25');
+  // e a tela mostra isso
+  const txt = await page.textContent('#view');
+  assert.match(txt, /Seu cartão hoje/);
+  assert.match(txt, /Melhor dia de compra|melhor dia de compra/);
+  await ctx.close();
+});
+
+test('vários cartões: cada compra cai na fatura do seu cartão', async()=>{
+  const st = estado({cartoes:[{id:'k1', nome:'Nubank', fechamento:5, vencimento:12}, {id:'k2', nome:'Inter', fechamento:25, vencimento:5}]});
+  const {page, ctx} = await abrir(st);
+  await aba(page,'lancar');
+  await page.click('[data-act="dMeio"][data-id="cartao"]');
+  await page.click('[data-act="dCartao"][data-id="k2"]');
+  await page.fill('#gValor','100'); await page.fill('#gData', ym(0)+'-10'); await page.click('[data-act="saveG"]');
+  await aba(page,'lancar');
+  await page.click('[data-act="dCartao"][data-id="k1"]');
+  await page.fill('#gValor','40'); await page.fill('#gData', ym(0)+'-10'); await page.click('[data-act="saveG"]');
+  await aba(page,'lancar');
+  await page.click('[data-act="dCartao"][data-id="k2"]'); await page.click('[data-act="dParc"][data-v="1"]');
+  await page.fill('#gValor','300'); await page.fill('#gParc','3'); await page.fill('#gData', ym(0)+'-10'); await page.click('[data-act="saveG"]');
+  const s = await lerEstado(page);
+  assert.deepEqual(s.gastos.map(g=>g.cartao), ['k2','k1']);
+  assert.equal(s.recorrentes[0].cartao, 'k2');
+  assert.equal(s.recorrentes[0].inicio, ym(1), 'Inter: compra dia 10, fecha 25, vence dia 5 do mês seguinte');
+  const por = await page.evaluate(async k=>{ const {calc} = await import('./js/finance.js'); return calc(k).porCartao.map(x=>[x.cartao.id, x.total]); }, ym(1));
+  assert.deepEqual(Object.fromEntries(por), {k1:40, k2:200}, 'Nubank: compra dia 10 depois do fechamento (5) vence em 12 do mês seguinte');
+  await aba(page,'inicio');
+  assert.match(await page.textContent('#view'), /Seus cartões hoje/);
+  assert.match(await page.textContent('#lista'), /Inter/);
+  await ctx.close();
+});
+
+test('cartões em Ajustes: adicionar, editar e remover', async()=>{
+  const {page, ctx} = await abrir(estado({gastos:[{id:'g1', data:iso(0), valor:10, cat:'mercado', meio:'cartao', cartao:'k1', desc:'', criado:1}]}));
+  await aba(page,'ajustes');
+  assert.equal(await page.$('[data-act="delCartao"]'), null, 'não dá para remover o único cartão');
+  await page.fill('#nKn','Inter'); await page.fill('#nKf','25'); await page.fill('#nKv','5'); await page.click('[data-act="addCartao"]');
+  let s = await lerEstado(page);
+  const inter = s.cartoes.find(k=>k.nome==='Inter');
+  assert.deepEqual([inter.fechamento, inter.vencimento], [25, 5]);
+  await page.fill('[data-kv="k1"]','40'); await page.click('[data-act="saveCartoes"]');
+  assert.match(await toastTxt(page), /Confira os dias/);
+  await page.fill('[data-kv="k1"]','15'); await page.fill('[data-kn="k1"]','Nubank roxinho'); await page.click('[data-act="saveCartoes"]');
+  s = await lerEstado(page);
+  assert.deepEqual([s.cartoes[0].nome, s.cartoes[0].vencimento], ['Nubank roxinho', 15]);
+  // com lançamentos: só sai das opções, continua nas faturas
+  await page.click('[data-act="delCartao"][data-id="k1"]');
+  s = await lerEstado(page);
+  assert.equal(s.cartoes.find(k=>k.id==='k1').arquivado, true);
+  assert.equal(s.gastos[0].cartao, 'k1');
+  assert.match(await page.textContent('#view'), /Removidos .*Nubank roxinho/);
+  await aba(page,'lancar');
+  assert.equal(await page.$('[data-act="dCartao"]'), null, 'com um cartão ativo não pergunta qual');
+  await ctx.close();
+});
+
+test('CSV com mais de um cartão pergunta de qual cartão é a fatura', async()=>{
+  const {page, ctx} = await abrir(estado({cartoes:[{id:'k1', nome:'Nubank', fechamento:5, vencimento:12}, {id:'k2', nome:'Inter', fechamento:25, vencimento:5}]}));
+  const d = iso(-2), dm = d.slice(8,10)+'/'+d.slice(5,7)+'/'+d.slice(0,4);
+  await aba(page,'ajustes');
+  await page.setInputFiles('#fileCsv', {name:'f.csv', mimeType:'text/csv', buffer:Buffer.from(`Data;Descrição;Valor\n${dm};MERCADO X;55,00\n`)});
+  await page.waitForSelector('#dlg[open]');
+  assert.match(await page.textContent('#dlg'), /De qual cartão/);
+  await page.click('[data-dlg="k2"]');
+  await page.waitForFunction(()=>JSON.parse(localStorage.getItem('meucaixa.v1')).gastos.length===1);
+  assert.equal((await lerEstado(page)).gastos[0].cartao, 'k2');
   await ctx.close();
 });
