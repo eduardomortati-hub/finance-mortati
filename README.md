@@ -2,12 +2,12 @@
 
 Controle financeiro pessoal em PWA: gastos e entradas, vários cartões (fatura, vencimento e melhor dia de compra de cada um), fixos e parcelas (com encerramento e reajuste), metas, limites e categorias editáveis, histórico mensal e busca.
 
-**Privacidade:** não há servidor, login, analytics ou bibliotecas de terceiros. Os dados ficam só no `localStorage` do aparelho; este repositório contém apenas o código. A Content-Security-Policy do `index.html` bloqueia qualquer conexão de rede feita pelo app (`connect-src 'none'`). O backup pode ser protegido com senha (AES-GCM 256 + PBKDF2, tudo no navegador).
+**Privacidade:** sem analytics nem bibliotecas de terceiros. Os dados ficam no `localStorage` do aparelho e o app funciona sem internet. Com conta (opcional), eles também vão para o Supabase do dono do app (`js/nuvem.js`): login por e-mail e senha, e cada pessoa só acessa a própria linha da tabela `dados` (regras RLS no banco). Sem conta, nada sai do aparelho. A Content-Security-Policy do `index.html` só permite conexão com esse Supabase. O backup pode ser protegido com senha (AES-GCM 256 + PBKDF2, tudo no navegador).
 
 ## Usar
 Abra o endereço do GitHub Pages no celular e use **Adicionar à tela inicial** (Safari no iPhone, Chrome no Android). Depois de instalado, funciona offline. No iPhone, instale: aberto só no Safari, o sistema pode apagar os dados após 7 dias sem uso.
 
-Para levar dados de um aparelho para outro, use **Ajustes → Exportar backup** e **Importar backup**. No iPhone, o app instalado tem armazenamento separado do Safari: importe o backup de dentro do app.
+Com conta, celular e computador mostram os mesmos dados. Sem conta, para levar dados de um aparelho para outro, use **Ajustes → Exportar backup** e **Importar backup**. No iPhone, o app instalado tem armazenamento separado do Safari: importe o backup de dentro do app.
 
 ## Desenvolver
 Os arquivos usam módulos ES, então precisam de um servidor local (abrir o `index.html` direto não funciona):

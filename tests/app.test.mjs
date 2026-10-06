@@ -44,7 +44,7 @@ function estado(extra={}){
     gastos:[], entradas:[], recorrentes:[], metas:[], limites:{}, ...extra};
 }
 
-async function abrir(state, {sw=false, ua, viewport={width:390,height:844}} = {}){
+async function abrir(state, {sw=false, ua, viewport={width:390,height:844}, conta=false, nuvem=null} = {}){
   const ctx = await browser.newContext({viewport, serviceWorkers: sw?'allow':'block', acceptDownloads:true, userAgent:ua});
   const page = await ctx.newPage();
   const errors = [], requests = [];
@@ -52,8 +52,10 @@ async function abrir(state, {sw=false, ua, viewport={width:390,height:844}} = {}
   page.on('console', m=>{ if(m.type()==='error') errors.push(m.text()); });
   page.on('dialog', d=>d.accept());
   ctx.on('request', r=>requests.push(r.url()));
+  if(nuvem) await ctx.route(u=>u.href.startsWith(SB), nuvem.rota);
   await page.goto(BASE);
-  await page.evaluate(s=>{ localStorage.clear(); if(s) localStorage.setItem('meucaixa.v1', JSON.stringify(s)); }, state ?? null);
+  // sem `conta`, abre no modo "sem conta" (como antes da conta existir)
+  await page.evaluate(([s, conta])=>{ localStorage.clear(); if(!conta) localStorage.setItem('meucaixa.semConta','true'); if(s) localStorage.setItem('meucaixa.v1', JSON.stringify(s)); }, [state ?? null, conta]);
   await page.reload(); await page.waitForSelector('#view .card');
   return {ctx, page, errors, requests};
 }
@@ -63,6 +65,51 @@ const aba = (page, t) => page.click(`nav [data-t="${t}"]`);
 const toastTxt = page => page.textContent('#toast');
 // abre uma seção recolhível (data-fold), se ainda estiver fechada
 const secao = async (page, id) => { if(!await page.$eval(`[data-fold="${id}"]`, d=>d.open)) await page.click(`[data-fold="${id}"] > summary`); };
+
+// Supabase de mentira para os testes (nada vai para o servidor de verdade): contas, sessões e a tabela "dados" com RLS
+const SB = 'https://vaxqtliwlkokfgnpgtbt.supabase.co';
+function nuvemFake(){
+  const users = new Map(), linhas = new Map(), chamadas = [];
+  const cors = {'access-control-allow-origin':'*', 'access-control-allow-headers':'*', 'access-control-allow-methods':'*'};
+  const json = (route, status, body) => route.fulfill({status, headers:{...cors, 'content-type':'application/json'}, body:JSON.stringify(body)});
+  const sessaoDe = u => ({access_token:'tok-'+u.id, refresh_token:'ref-'+u.id, expires_in:3600, user:{id:u.id, email:u.email, user_metadata:{nome:u.nome}}});
+  const quem = req => [...users.values()].find(u=>'Bearer tok-'+u.id===req.headers()['authorization']);
+  let relogio = 0;
+  const rota = async route => {
+    const req = route.request(), url = new URL(req.url()), m = req.method();
+    if(m==='OPTIONS') return route.fulfill({status:204, headers:cors});
+    chamadas.push(m+' '+url.pathname);
+    const body = req.postData() ? JSON.parse(req.postData()) : null;
+    if(url.pathname==='/auth/v1/token' && url.searchParams.get('grant_type')==='password'){
+      const u = users.get(body.email);
+      if(!u || u.senha!==body.password) return json(route, 400, {error_code:'invalid_credentials', msg:'Invalid login credentials'});
+      return json(route, 200, sessaoDe(u));
+    }
+    if(url.pathname==='/auth/v1/signup'){ users.set(body.email, {id:'u'+users.size, email:body.email, senha:body.password, nome:body.data?.nome||''}); return json(route, 200, {id:'x'}); }
+    if(url.pathname==='/auth/v1/recover') return json(route, 200, {});
+    if(url.pathname==='/auth/v1/logout') return json(route, 204, {});
+    if(url.pathname==='/auth/v1/user'){
+      const u = quem(req); if(!u) return json(route, 401, {msg:'no'});
+      if(m==='PUT') u.senha = body.password;
+      return json(route, 200, {id:u.id, email:u.email, user_metadata:{nome:u.nome}});
+    }
+    if(url.pathname==='/rest/v1/dados'){
+      const u = quem(req); if(!u) return json(route, 200, []);           // RLS: sem login, não vê nada
+      const l = linhas.get(u.id);
+      if(m==='GET') return json(route, 200, l ? [l] : []);
+      const agora = new Date(Date.UTC(2026,0,1,0,0,++relogio)).toISOString().replace('Z','+00:00');
+      if(m==='POST'){ linhas.set(u.id, {estado:body.estado, atualizado:agora}); return json(route, 201, [linhas.get(u.id)]); }
+      if(m==='PATCH'){
+        const base = (url.searchParams.get('atualizado')||'').replace(/^eq\./,'');
+        if(!l || l.atualizado!==base) return json(route, 200, []);      // alguém gravou antes: conflito
+        linhas.set(u.id, {estado:body.estado, atualizado:agora}); return json(route, 200, [linhas.get(u.id)]);
+      }
+    }
+    return json(route, 404, {msg:'?'});
+  };
+  return {users, linhas, chamadas, rota, conta(email, senha, nome=''){ users.set(email, {id:'u'+users.size, email, senha, nome}); return users.get(email); }};
+}
+const entrarComo = async (page, email, senha) => { await page.fill('#aEmail', email); await page.fill('#aSenha', senha); await page.click('[data-act="authEntrar"]'); };
 
 /* ---------- testes ---------- */
 test('começa vazio, sem dados de exemplo', async()=>{
@@ -703,5 +750,101 @@ test('investimentos: adicionar, aplicar, resgatar e atualizar saldo', async()=>{
   // backup de versão mais nova é recusado por versões antigas: o arquivo sai com v4
   assert.equal((await lerEstado(page)).v, 4);
   assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('conta: tela de entrar, usar sem conta, e nada vai para a nuvem sem conta', async()=>{
+  const nv = nuvemFake();
+  const {page, ctx, errors} = await abrir(null, {conta:true, nuvem:nv});
+  assert.ok(await page.isVisible('[data-act="authEntrar"]'));
+  assert.equal(await page.isVisible('nav'), false, 'sem a barra de abas antes de entrar');
+  await page.click('[data-act="authSemConta"]');
+  assert.ok(await page.isVisible('.hero'));
+  await aba(page,'lancar'); await page.fill('#gValor','10'); await page.click('[data-act="saveG"]');
+  await page.waitForTimeout(1500);
+  assert.deepEqual(nv.chamadas, [], 'sem conta, nenhuma chamada ao Supabase');
+  await page.reload(); await page.waitForSelector('#view .card');
+  assert.ok(await page.isVisible('.hero'), 'continua sem conta ao reabrir');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('conta: senha errada, entrar sobe os dados do aparelho e cada alteração sincroniza', async()=>{
+  const nv = nuvemFake(); const u = nv.conta('eu@teste.com', 'segredo1', 'Edu');
+  const {page, ctx, errors} = await abrir(estado({gastos:[{id:'g1', data:iso(0), valor:42, cat:'mercado', meio:'pix', desc:'feira', criado:1}]}), {conta:true, nuvem:nv});
+  await entrarComo(page, 'eu@teste.com', 'errada');
+  await page.waitForSelector('.auth-erro:not([hidden])');
+  assert.match(await page.textContent('.auth-erro'), /E-mail ou senha incorretos/);
+  await entrarComo(page, 'eu@teste.com', 'segredo1');
+  await page.waitForSelector('.hero');
+  assert.equal(nv.linhas.get(u.id).estado.gastos[0].desc, 'feira', 'conta vazia recebe os dados do aparelho');
+  await aba(page,'lancar'); await page.fill('#gValor','15'); await page.fill('#gDesc','pão'); await page.click('[data-act="saveG"]');
+  await page.waitForFunction(()=>true); await page.waitForTimeout(1700);
+  assert.equal(nv.linhas.get(u.id).estado.gastos.length, 2, 'o gasto novo foi para a nuvem');
+  await aba(page,'ajustes'); await secao(page,'conta');
+  assert.match(await page.textContent('#syncStatus'), /Sincronizado/);
+  assert.deepEqual(errors.filter(e=>!/status of 400/.test(e)), [], 'só o 400 da senha errada');
+  await ctx.close();
+});
+
+test('conta: outro aparelho recebe os dados; com dados diferentes, pergunta qual vale', async()=>{
+  const nv = nuvemFake(); const u = nv.conta('eu@teste.com', 'segredo1');
+  nv.linhas.set(u.id, {estado:estado({gastos:[{id:'n1', data:iso(0), valor:99, cat:'mercado', meio:'pix', desc:'da nuvem', criado:1}]}), atualizado:'2026-01-01T00:00:00+00:00'});
+  // aparelho vazio: só recebe
+  let a = await abrir(null, {conta:true, nuvem:nv});
+  await entrarComo(a.page, 'eu@teste.com', 'segredo1'); await a.page.waitForSelector('.hero');
+  assert.match(await a.page.textContent('#lista'), /da nuvem/);
+  await a.ctx.close();
+  // aparelho com outros dados: pergunta; escolher "deste aparelho" manda para a nuvem
+  a = await abrir(estado({gastos:[{id:'l1', data:iso(0), valor:5, cat:'mercado', meio:'pix', desc:'do celular', criado:1}]}), {conta:true, nuvem:nv});
+  await entrarComo(a.page, 'eu@teste.com', 'segredo1');
+  await a.page.waitForSelector('#dlg[open]');
+  assert.match(await a.page.textContent('#dlg'), /Qual versão/);
+  await a.page.click('[data-dlg="aparelho"]'); await a.page.waitForSelector('.hero');
+  assert.equal(nv.linhas.get(u.id).estado.gastos[0].desc, 'do celular');
+  const copia = await a.page.evaluate(()=>Object.keys(localStorage).some(k=>k.startsWith('meucaixa.v1.copia-')));
+  assert.ok(copia, 'a versão não escolhida fica guardada como cópia');
+  await a.ctx.close();
+});
+
+test('conta: mudanças de outro aparelho chegam ao voltar para o app; sair limpa o aparelho', async()=>{
+  const nv = nuvemFake(); const u = nv.conta('eu@teste.com', 'segredo1');
+  const {page, ctx} = await abrir(null, {conta:true, nuvem:nv});
+  await entrarComo(page, 'eu@teste.com', 'segredo1'); await page.waitForSelector('.hero');
+  // o "PC" grava direto na nuvem
+  const l = nv.linhas.get(u.id); l.estado = {...l.estado, gastos:[{id:'pc1', data:iso(0), valor:7, cat:'outros', meio:'pix', desc:'lançado no PC', criado:5}]}; l.atualizado = '2026-02-01T00:00:00+00:00';
+  await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));
+  await page.waitForFunction(()=>/lançado no PC/.test(document.querySelector('#lista')?.textContent||''));
+  await aba(page,'ajustes'); await secao(page,'conta'); await page.click('[data-act="sairConta"]');
+  await page.waitForSelector('[data-act="authEntrar"]');
+  const s = await lerEstado(page);
+  assert.equal(s.gastos.length, 0, 'os dados saem do aparelho ao sair');
+  assert.equal(await page.evaluate(()=>localStorage.getItem('meucaixa.sessao')), null);
+  await ctx.close();
+});
+
+test('conta: criar conta pede confirmação por e-mail; esqueci a senha e link de nova senha', async()=>{
+  const nv = nuvemFake();
+  const {page, ctx} = await abrir(null, {conta:true, nuvem:nv});
+  await page.click('[data-act="authTela"][data-v="criar"]');
+  await page.fill('#aNome','Ana'); await page.fill('#aEmail','ana@teste.com'); await page.fill('#aSenha','abc123'); await page.fill('#aSenha2','abc124');
+  await page.click('[data-act="authCriar"]');
+  assert.match(await page.textContent('.auth-erro'), /não conferem/);
+  await page.fill('#aSenha2','abc123'); await page.click('[data-act="authCriar"]');
+  await page.waitForSelector('text=Veja seu e-mail');
+  assert.ok(nv.users.has('ana@teste.com'));
+  await page.click('[data-act="authTela"][data-v="entrar"]');
+  await page.click('[data-act="authTela"][data-v="esqueci"]');
+  await page.fill('#aEmail','ana@teste.com'); await page.click('[data-act="authEsqueci"]');
+  await page.waitForSelector('text=Veja seu e-mail');
+  // o link do e-mail volta para o app com a sessão no endereço
+  const u = nv.users.get('ana@teste.com');
+  await page.goto('about:blank');   // carrega o app do zero, como ao tocar no link do e-mail
+  await page.goto(BASE + '#access_token=tok-'+u.id+'&refresh_token=r&expires_in=3600&type=recovery');
+  await page.waitForSelector('[data-act="authNovaSenha"]');
+  assert.equal(await page.evaluate(()=>location.hash), '', 'o token sai do endereço');
+  await page.fill('#aSenha','nova123'); await page.fill('#aSenha2','nova123'); await page.click('[data-act="authNovaSenha"]');
+  await page.waitForSelector('.hero');
+  assert.equal(u.senha, 'nova123');
   await ctx.close();
 });

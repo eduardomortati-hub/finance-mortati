@@ -1,12 +1,13 @@
 import { CATS, MEIOS, RULES, CORES_CARTAO, TIPOS_INV, tipoInv, meioOf } from './config.js';
 import { S, catOf, catsAtivas, cartaoOf, cartoesAtivos } from './store.js';
+import { sessao, status as syncStatus, pendente } from './nuvem.js';
 import { calc, recInMonth, faturaPeriodo, vencimentoData, infoCartao, rendimentoNoMes } from './finance.js';
 import { $, esc, fmt, todayISO, thisMonth, addM, diffM, mLabel, dLabel, sum, normTxt, diasEntre, addDias, valIn, parseNum, fmtReal, discreto } from './util.js';
 
 // estado da interface (não é salvo)
 export const ui = {tab:'inicio', mes:thisMonth(), draft:{tipo:'gasto', cat:null, meio:'cartao', parcelado:false},
   editId:null, editG:null, cartaoEd:null, cartaoCor:null, invEd:null, invNovoTipo:'cdb', invNovoJa:true, busca:{q:'', cat:'', meio:''}, buscaAberta:false,
-  abertos:new Set()};   // seções recolhíveis que a pessoa abriu (data-fold)
+  abertos:new Set(), tela:null, authMsg:''};   // tela: entrar | criar | esqueci | novaSenha | aviso (antes de entrar no app)   // seções recolhíveis que a pessoa abriu (data-fold)
 
 const ymBR = k => mLabel(k,true)+'/'+k.slice(2,4);
 const dot = c => `<span class="dot" style="background:${c}"></span>`;
@@ -20,6 +21,8 @@ export const meioLabel = x => x.meio==='cartao' && S.cartoes.length>1 ? cartaoOf
 
 let lastTab = null;
 export function render(){
+  document.body.classList.toggle('auth', !!ui.tela);
+  if(ui.tela){ $('#view').innerHTML = vAuth(); lastTab = null; return; }
   if(ui.tab!=='ajustes') ui.cartaoEd = null;
   if(ui.tab!=='metas') ui.invEd = null;   // sair de Ajustes descarta a edição de cartão pela metade
   document.querySelectorAll('nav button').forEach(b=>{
@@ -48,7 +51,7 @@ function avisos(){
   if(isIOS() && !instalado()) h += banner(`<b>Instale o app no iPhone:</b> toque em Compartilhar → <b>Adicionar à Tela de Início</b>. Aberto só no Safari, o iPhone pode apagar seus dados depois de 7 dias sem uso.`);
   if(!S.config.configurado) h += banner(`Antes de tudo: confira sua renda e seus <b>cartões</b> (dia de fechamento e de vencimento). <a data-act="tab" data-t="ajustes">Ir para Ajustes</a>`);
   const d = diasSemBackup();
-  if(temDados() && (d===null || d>=15)) h += banner(`${d===null ? 'Você ainda não fez nenhum backup.' : `Seu último backup foi há ${d} dias.`} Seus dados existem só neste aparelho. <a data-act="export">Fazer backup agora</a>`);
+  if(!sessao() && temDados() && (d===null || d>=15)) h += banner(`${d===null ? 'Você ainda não fez nenhum backup.' : `Seu último backup foi há ${d} dias.`} Seus dados existem só neste aparelho. <a data-act="export">Fazer backup agora</a>`);
   return h;
 }
 
@@ -472,10 +475,56 @@ export function sugestoesCat(aberta=true){
   inp.setAttribute('aria-expanded', String(aberta));
 }
 
+/* ---------- conta ---------- */
+const campo = (id, rotulo, tipo, auto, extra='') => `<label for="${id}">${rotulo}</label><input id="${id}" type="${tipo}" autocomplete="${auto}" ${extra}>`;
+function vAuth(){
+  const t = ui.tela, link = (v, txt) => `<button class="link" data-act="authTela" data-v="${v}">${txt}</button>`;
+  const topo = (titulo, sub) => `<div class="auth-top"><h2>${titulo}</h2>${sub ? `<p class="note">${sub}</p>` : ''}</div>`;
+  let h = '';
+  if(t==='entrar') h = topo('Entre na sua conta', 'Seus dados ficam iguais no celular e no computador.')
+    + campo('aEmail','E-mail','email','email','inputmode="email" autocapitalize="off"') + campo('aSenha','Senha','password','current-password')
+    + `<p class="auth-erro neg sm" hidden></p><button class="btn" data-act="authEntrar">Entrar</button>
+      <div class="auth-links">${link('esqueci','Esqueci a senha')}${link('criar','Criar conta')}</div>`;
+  else if(t==='criar') h = topo('Criar conta', 'Cada pessoa tem a sua conta, e uma não vê os dados da outra.')
+    + campo('aNome','Seu nome (opcional)','text','name','maxlength="40"') + campo('aEmail','E-mail','email','email','inputmode="email" autocapitalize="off"')
+    + campo('aSenha','Senha (pelo menos 6 caracteres)','password','new-password') + campo('aSenha2','Repita a senha','password','new-password')
+    + `<p class="auth-erro neg sm" hidden></p><button class="btn" data-act="authCriar">Criar conta</button>
+      <div class="auth-links">${link('entrar','Já tenho conta')}</div>`;
+  else if(t==='esqueci') h = topo('Esqueci a senha', 'Enviamos um link para o seu e-mail para criar uma senha nova. Seus dados continuam na conta.')
+    + campo('aEmail','E-mail','email','email','inputmode="email" autocapitalize="off"')
+    + `<p class="auth-erro neg sm" hidden></p><button class="btn" data-act="authEsqueci">Enviar link</button>
+      <div class="auth-links">${link('entrar','Voltar')}</div>`;
+  else if(t==='novaSenha') h = topo('Crie uma senha nova', esc(sessao()?.user.email || ''))
+    + campo('aSenha','Senha nova (pelo menos 6 caracteres)','password','new-password') + campo('aSenha2','Repita a senha','password','new-password')
+    + `<p class="auth-erro neg sm" hidden></p><button class="btn" data-act="authNovaSenha">Salvar senha nova</button>`;
+  else h = topo('Veja seu e-mail', ui.authMsg) + `<button class="btn sec" data-act="authTela" data-v="entrar">Voltar para entrar</button>`;
+  if(t==='entrar' || t==='criar') h += `<button class="link sem-conta" data-act="authSemConta">Usar sem conta, só neste aparelho</button>`;
+  return `<div class="auth-box card">${h}</div>`;
+}
+export function statusTexto(){
+  if(!sessao()) return 'Sem conta: os dados ficam só neste aparelho.';
+  const f = syncStatus.fase, hora = syncStatus.quando?.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'});
+  if(f==='enviando') return 'Sincronizando…';
+  if(f==='offline') return pendente() ? 'Sem internet: as alterações ficam guardadas e vão quando a conexão voltar.' : 'Sem internet no momento.';
+  if(f==='erro') return syncStatus.msg || 'Não consegui sincronizar.';
+  return hora ? `Sincronizado às ${hora}.` : 'Conectado.';
+}
+function vConta(){
+  const s = sessao();
+  if(!s) return fold('conta', 'Conta', 'sem conta', `
+    <p class="note" style="margin-top:0">Você está usando sem conta: os dados ficam só neste aparelho. Com uma conta, eles aparecem iguais no celular e no computador.</p>
+    <button class="btn" data-act="contaEntrar">Entrar ou criar conta</button>`);
+  return fold('conta', 'Conta', esc(s.user.nome || s.user.email), `
+    <div class="row"><span class="l">${s.user.nome ? `<b>${esc(s.user.nome)}</b><br>` : ''}<span class="mut sm">${esc(s.user.email)}</span></span></div>
+    <p class="note" id="syncStatus">${statusTexto()}</p>
+    <div class="btns"><button class="btn sec" data-act="syncAgora">Sincronizar agora</button><button class="btn sec" data-act="sairConta">Sair da conta</button></div>`);
+}
+
 function vAjustes(){
   const c = S.config, d = diasSemBackup();
   const ultimo = d===null ? 'Nenhum backup feito ainda.' : `Último backup: ${dLabel(c.ultimoBackup)}/${c.ultimoBackup.slice(0,4)} (${d===0?'hoje':d===1?'ontem':`há ${d} dias`}).`;
-  return `${fold('renda', 'Renda', fmt(c.renda), `
+  return `${vConta()}
+  ${fold('renda', 'Renda', fmt(c.renda), `
     <label for="cRenda" style="margin-top:0">Renda fixa mensal (salário, pró-labore)</label><input id="cRenda" inputmode="decimal" value="${valIn(c.renda)||'0'}">
     <p class="note">Recebe valores que mudam todo mês (MEI, freelas, extras)? Lance cada recebimento como <b>Entrada</b> no botão +. Se toda a sua renda varia, deixe 0 aqui.</p>
     <button class="btn" data-act="saveCfg">Salvar</button>`, !S.config.configurado)}
@@ -494,7 +543,7 @@ function vAjustes(){
     <button class="btn sec" data-act="pickCsv">Escolher arquivo CSV</button>`)}
 
   ${fold('dados', 'Backup e dados', d===null ? 'sem backup' : d===0 ? 'backup hoje' : `backup há ${d} d`, `
-    <p class="note" style="margin-top:0">Tudo fica salvo só neste aparelho. Nada é enviado para lugar nenhum. Por isso, <b>exporte um backup de vez em quando</b> — e use o mesmo arquivo para passar os dados do PC para o celular (ou vice-versa).</p>
+    <p class="note" style="margin-top:0">${sessao() ? 'Seus dados estão na sua conta e também neste aparelho. O backup é uma cópia extra, em arquivo.' : 'Sem conta, tudo fica salvo só neste aparelho. Por isso, <b>exporte um backup de vez em quando</b>.'}</p>
     <p class="note"><b>${ultimo}</b></p>
     <div class="btns"><button class="btn" data-act="export">Exportar backup</button><button class="btn sec" data-act="pickJson">Importar backup</button></div>
     <p class="note">${S.gastos.length} gastos · ${S.entradas.length} entradas · ${S.recorrentes.length} fixos/parcelas · ${S.metas.filter(m=>!m.arquivada).length} metas</p>

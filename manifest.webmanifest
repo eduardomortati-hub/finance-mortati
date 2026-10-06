@@ -1,7 +1,7 @@
 {
   "name": "Meu Caixa",
   "short_name": "Meu Caixa",
-  "description": "Controle financeiro pessoal. Os dados ficam só no aparelho.",
+  "description": "Controle financeiro pessoal. Funciona offline e sincroniza entre aparelhos com conta.",
   "lang": "pt-BR",
   "id": "./",
   "start_url": "./",

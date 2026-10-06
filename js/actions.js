@@ -1,11 +1,12 @@
-import { S, save, setS, catOf, cartaoOf, cartoesAtivos } from './store.js';
+import { S, save, setS, trocaS, catOf, cartaoOf, cartoesAtivos } from './store.js';
+import * as nuvem from './nuvem.js';
 import { empty } from './model.js';
 import { faturaMonth } from './finance.js';
-import { ui, render, totalParcelado } from './views.js';
+import { ui, render, totalParcelado, statusTexto } from './views.js';
 import { ask } from './modal.js';
 import { cifrar } from './crypto.js';
 import { CATS, CORES_CARTAO } from './config.js';
-import { $, uid, fmt, fmtReal, discreto, setDiscreto, round2, parseNum, todayISO, thisMonth, addM, diffM, mLabel, valIn, toast } from './util.js';
+import { $, esc, uid, fmt, fmtReal, discreto, setDiscreto, round2, parseNum, todayISO, thisMonth, addM, diffM, mLabel, valIn, toast } from './util.js';
 
 function download(texto, nome){
   const blob = new Blob([texto], {type:'application/json'});
@@ -314,8 +315,75 @@ export const A = {
   },
   pickJson(){ $('#fileJson').click(); },
   pickCsv(){ $('#fileCsv').click(); },
-  reset(){ if(!confirm('Apagar TODOS os dados deste aparelho? Exporte um backup antes se quiser guardar.')) return; setS(empty()); ui.tab='inicio'; render(); }
+  reset(){ if(!confirm(nuvem.sessao() ? 'Apagar TODOS os seus dados, neste aparelho e na sua conta? Exporte um backup antes se quiser guardar.' : 'Apagar TODOS os dados deste aparelho? Exporte um backup antes se quiser guardar.')) return; setS(empty()); ui.tab='inicio'; render(); },
+
+  /* conta */
+  authTela(d){ const e = $('#aEmail')?.value; ui.tela = d.v; render(); if(e && $('#aEmail')) $('#aEmail').value = e; $('#view input')?.focus(); },
+  authSemConta(){ nuvem.usarSemConta(true); ui.tela = null; ui.tab = 'inicio'; render(); },
+  contaEntrar(){ nuvem.usarSemConta(false); ui.tela = 'entrar'; render(); },
+  async authEntrar(){
+    const email = $('#aEmail').value.trim(), senha = $('#aSenha').value;
+    if(!email || !senha) return erroAuth('Preencha e-mail e senha');
+    await ocupado('Entrando…', async()=>{ await nuvem.entrar(email, senha); await depoisDeEntrar(); });
+  },
+  async authCriar(){
+    const nome = $('#aNome').value.trim().slice(0,40), email = $('#aEmail').value.trim(), s1 = $('#aSenha').value, s2 = $('#aSenha2').value;
+    if(!email) return erroAuth('Digite seu e-mail');
+    if(s1.length<6) return erroAuth('A senha precisa ter pelo menos 6 caracteres');
+    if(s1!==s2) return erroAuth('As senhas não conferem');
+    await ocupado('Criando…', async()=>{
+      const s = await nuvem.criarConta(nome, email, s1);
+      if(s) return depoisDeEntrar();
+      ui.tela = 'aviso'; ui.authMsg = `Enviamos um link de confirmação para <b>${esc(email)}</b>. Abra o e-mail e toque no link para entrar. Se não chegar, veja a caixa de spam.`; render();
+    });
+  },
+  async authEsqueci(){
+    const email = $('#aEmail').value.trim(); if(!email) return erroAuth('Digite seu e-mail');
+    await ocupado('Enviando…', async()=>{
+      await nuvem.esqueciSenha(email);
+      ui.tela = 'aviso'; ui.authMsg = `Se existir uma conta com <b>${esc(email)}</b>, enviamos um link para criar uma senha nova. Abra o e-mail e toque no link.`; render();
+    });
+  },
+  async authNovaSenha(){
+    const s1 = $('#aSenha').value, s2 = $('#aSenha2').value;
+    if(s1.length<6) return erroAuth('A senha precisa ter pelo menos 6 caracteres');
+    if(s1!==s2) return erroAuth('As senhas não conferem');
+    await ocupado('Salvando…', async()=>{ await nuvem.novaSenha(s1); toast('Senha nova salva ✓'); await depoisDeEntrar(); });
+  },
+  async syncAgora(){ await nuvem.sincronizar(); toast(statusTexto()); },
+  async sairConta(){
+    await nuvem.sincronizar();
+    const aviso = nuvem.pendente()
+      ? 'Há alterações que ainda não foram para a nuvem (sem internet). Se sair agora, elas se perdem. Sair mesmo assim?'
+      : 'Sair da conta?\n\nOs dados saem deste aparelho, mas continuam na sua conta. É só entrar de novo para ver tudo.';
+    if(!confirm(aviso)) return;
+    await nuvem.sair();
+    trocaS(empty()); ui.tela = 'entrar'; ui.tab = 'inicio'; render();
+  }
 };
+
+/* ---------- ajudantes da conta ---------- */
+function erroAuth(msg){ const p = $('.auth-erro'); if(!p) return toast(msg); p.textContent = msg; p.hidden = false; }
+// desativa o botão enquanto fala com o servidor e mostra o erro na tela
+async function ocupado(rotulo, fn){
+  const b = document.querySelector('.auth-box .btn'), antes = b?.textContent;
+  if(b){ b.disabled = true; b.textContent = rotulo; }
+  try{ await fn(); }
+  catch(e){ if(b?.isConnected){ b.disabled = false; b.textContent = antes; } erroAuth(e.message || 'Algo deu errado. Tente de novo.'); }
+}
+// depois de entrar: decide entre os dados do aparelho e os da nuvem, e abre o app
+export async function depoisDeEntrar(){
+  await nuvem.primeiraSincronizacao(async r=>{
+    const quando = new Date(r.nuvem.quando).toLocaleString('pt-BR', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'});
+    const desc = x => `${x.gastos} gastos, ${x.entradas} entradas e ${x.fixos} fixos`;
+    const esc2 = await ask({titulo:'Qual versão dos dados vale?',
+      texto:`Este aparelho e a sua conta têm dados diferentes.<br><br><b>Na conta</b> (atualizado em ${quando}): ${desc(r.nuvem)}.<br><b>Neste aparelho:</b> ${desc(r.aparelho)}.<br><br>A outra versão fica guardada como cópia neste aparelho.`,
+      botoes:[{id:'nuvem', rotulo:'Usar os da conta'}, {id:'aparelho', rotulo:'Usar os deste aparelho'}], cancelar:'Usar os da conta'});
+    return esc2?.botao==='aparelho' ? 'aparelho' : 'nuvem';
+  });
+  ui.tela = null; ui.tab = 'inicio'; render();
+  const s = nuvem.sessao(); toast(s?.user.nome ? `Olá, ${s.user.nome}!` : 'Pronto, você entrou ✓');
+}
 
 function keepInv(){ // re-renderiza o formulário de novo investimento sem perder o que foi digitado
   const n = $('#iNome')?.value, v = $('#iSaldo')?.value;

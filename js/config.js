@@ -1,4 +1,8 @@
 export const KEY = 'meucaixa.v1';
+// Supabase do dono do app: conta e sincronização. A chave "publishable" é pública por natureza;
+// quem protege os dados são as regras do banco (cada pessoa só acessa a própria linha).
+export const SUPABASE_URL = 'https://vaxqtliwlkokfgnpgtbt.supabase.co';
+export const SUPABASE_KEY = 'sb_publishable_bwJJpCawgEk1rLhFZH14Gw_T8XgM6s2';
 // categorias padrão; as do usuário ficam em S.cats (editáveis em Ajustes)
 export const CATS = [
   {id:'delivery', n:'Delivery / iFood', c:'#ef4444'},

@@ -1,4 +1,4 @@
-// Os dados ficam só no localStorage deste navegador. Nada é enviado para fora.
+// Os dados ficam no localStorage deste navegador. Com conta, js/nuvem.js também os envia para a nuvem da pessoa.
 import { KEY } from './config.js';
 import { empty, normalize } from './model.js';
 import { toast, todayISO } from './util.js';
@@ -26,10 +26,15 @@ function load(){
 // `S` é live binding: quem importa sempre enxerga o estado atual, mesmo depois de setS()
 export let S = load();
 export function setS(d){ S = d; save(); }
-export function save(){
+let aoSalvar = null;
+export const setAoSalvar = fn => { aoSalvar = fn; };
+function gravarLocal(){
   try{ localStorage.setItem(KEY, JSON.stringify(S)); }
   catch(e){ toast('Este navegador não deixou salvar. Exporte um backup em Ajustes.'); }
 }
+export function save(){ gravarLocal(); aoSalvar?.(); }
+// troca os dados pelos que vieram da nuvem (sem disparar novo envio)
+export function trocaS(d){ S = d; gravarLocal(); }
 
 const OUTROS = {id:'outros', n:'Outros', c:'#94a3b8'};
 // categorias escondidas somem das opções, mas os lançamentos antigos continuam nelas

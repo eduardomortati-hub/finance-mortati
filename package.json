@@ -2,7 +2,7 @@
   "name": "meu-caixa",
   "private": true,
   "type": "module",
-  "description": "Controle financeiro pessoal em PWA. Os dados ficam só no aparelho.",
+  "description": "Controle financeiro pessoal em PWA. Funciona offline; com conta, sincroniza entre aparelhos.",
   "scripts": {
     "start": "npx --yes serve . -l 5174",
     "test": "node tools/stamp-sw.mjs --check && node --test --test-concurrency=1 tests/*.test.mjs",
