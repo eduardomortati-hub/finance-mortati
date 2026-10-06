@@ -61,6 +61,8 @@ const lerEstado = page => page.evaluate(()=>JSON.parse(localStorage.getItem('meu
 const calc = (page, k) => page.evaluate(async k=>{ const {calc} = await import('./js/finance.js'); const c = calc(k); return {sobra:c.sobra, fatura:c.fatura, fixosFora:c.fixosFora, guardado:c.guardado, entradas:c.entradas, saidas:c.saidas}; }, k);
 const aba = (page, t) => page.click(`nav [data-t="${t}"]`);
 const toastTxt = page => page.textContent('#toast');
+// abre uma seção recolhível (data-fold), se ainda estiver fechada
+const secao = async (page, id) => { if(!await page.$eval(`[data-fold="${id}"]`, d=>d.open)) await page.click(`[data-fold="${id}"] > summary`); };
 
 /* ---------- testes ---------- */
 test('começa vazio, sem dados de exemplo', async()=>{
@@ -181,6 +183,7 @@ test('apagar de vez remove também do histórico', async()=>{
   const {page, ctx} = await abrir(estado({recorrentes:[{id:'r1', nome:'Erro', valor:50, tipo:'fixo', meio:'pix', inicio:ym(-4), fim:ym(-1), cat:'outros'}]}));
   await aba(page,'fixos');
   assert.match(await page.textContent('#view'), /Encerrados \(1\)/);
+  await secao(page,'enc');
   await page.click('[data-act="delR"][data-id="r1"]');
   assert.equal((await lerEstado(page)).recorrentes.length, 0);
   assert.equal((await calc(page, ym(-2))).fixosFora, 0);
@@ -204,7 +207,7 @@ test('metas: guardar sai da sobra; remover a meta mantém o histórico', async()
 
 test('categorias: criar, renomear e apagar (lançamentos vão para Outros)', async()=>{
   const {page, ctx} = await abrir(estado({gastos:[{id:'g1', data:iso(0), valor:10, cat:'delivery', meio:'pix', desc:'', criado:1}], limites:{delivery:100}}));
-  await aba(page,'ajustes');
+  await aba(page,'ajustes'); await secao(page,'cats-ed');
   await page.fill('#nCat','Pets'); await page.click('[data-act="addCat"]');
   let s = await lerEstado(page);
   const pets = s.cats.find(c=>c.n==='Pets'); assert.ok(pets);
@@ -227,6 +230,8 @@ test('busca em todos os meses, com filtros', async()=>{
             {id:'b', data:iso(0), valor:20, cat:'saude', meio:'cartao', desc:'farmacia centro', criado:2},
             {id:'c', data:iso(0), valor:99, cat:'mercado', meio:'pix', desc:'feira', criado:3}],
     entradas:[{id:'e', data:ym(-1)+'-05', valor:700, desc:'cliente farm', criado:4}]}));
+  assert.equal(await page.$('[data-filtro="q"]'), null, 'a busca fica escondida até tocar na lupa');
+  await page.click('[data-act="busca"]');
   await page.fill('[data-filtro="q"]','farmacia');
   assert.match(await page.textContent('#listaTit'), /Resultados da busca \(2\)/);   // sem acento casa com acento
   await page.selectOption('[data-filtro="meio"]','pix');
@@ -278,7 +283,7 @@ test('backup com senha: arquivo cifrado, senha errada recusada, senha certa rest
   st.config.ultimoBackup = null;
   const {page, ctx} = await abrir(st);
   assert.match(await page.textContent('#view'), /ainda não fez nenhum backup/);
-  await aba(page,'ajustes'); await page.click('[data-act="export"]');
+  await aba(page,'ajustes'); await secao(page,'dados'); await page.click('[data-act="export"]');
   await page.fill('#dlg-s1','minhasenha'); await page.fill('#dlg-s2','outra'); await page.click('[data-dlg="com"]');
   assert.match(await page.textContent('.dlg-erro'), /não conferem/);
   await page.fill('#dlg-s2','minhasenha');
@@ -292,7 +297,7 @@ test('backup com senha: arquivo cifrado, senha errada recusada, senha certa rest
   await aba(page,'inicio');
   assert.doesNotMatch(await page.textContent('#view'), /backup/);
 
-  await aba(page,'ajustes'); await page.click('[data-act="reset"]');
+  await aba(page,'ajustes'); await secao(page,'dados'); await page.click('[data-act="reset"]');
   await page.setInputFiles('#fileJson', {name:'b.json', mimeType:'application/json', buffer:Buffer.from(arquivo)});
   await page.fill('#dlg-s','errada'); await page.click('[data-dlg="ok"]');
   await page.waitForFunction(()=>/Senha incorreta/.test(document.querySelector('#toast').textContent), null, {timeout:15000});
@@ -306,7 +311,7 @@ test('backup com senha: arquivo cifrado, senha errada recusada, senha certa rest
 
 test('backup sem senha e validação de arquivos', async()=>{
   const {page, ctx} = await abrir(estado({gastos:[{id:'g1', data:iso(0), valor:42, cat:'mercado', meio:'pix', desc:'x', criado:1}]}));
-  await aba(page,'ajustes'); await page.click('[data-act="export"]');
+  await aba(page,'ajustes'); await secao(page,'dados'); await page.click('[data-act="export"]');
   const [dl] = await Promise.all([page.waitForEvent('download'), page.click('[data-dlg="sem"]')]);
   const backup = JSON.parse(fs.readFileSync(await dl.path(), 'utf8'));
   assert.equal(backup.gastos[0].desc, 'x');
@@ -349,9 +354,10 @@ test('layout a 390px sem rolagem horizontal, inclusive com a janela de diálogo'
     metas:[{id:'m1', nome:'Reserva', alvo:10000, atual:500, movs:[]}], limites:{mercado:100}}));
   for(const t of ['inicio','lancar','fixos','metas','ajustes']){
     await aba(page,t);
+    await page.$$eval('#view details', ds=>ds.forEach(d=>{ d.open = true; }));   // com tudo aberto
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth) <= 390, t);
   }
-  await page.click('[data-act="export"]');
+  await secao(page,'dados'); await page.click('[data-act="export"]');
   assert.ok(await page.isVisible('#dlg'));
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth) <= 390, 'diálogo');
   assert.deepEqual(errors, []);
@@ -458,7 +464,7 @@ test('vários cartões: cada compra cai na fatura do seu cartão', async()=>{
 
 test('cartões em Ajustes: adicionar, editar e remover', async()=>{
   const {page, ctx} = await abrir(estado({gastos:[{id:'g1', data:iso(0), valor:10, cat:'mercado', meio:'cartao', cartao:'k1', desc:'', criado:1}]}));
-  await aba(page,'ajustes');
+  await aba(page,'ajustes'); await secao(page,'cartoes');
   assert.equal(await page.$('[data-act="delCartao"]'), null, 'não dá para remover o único cartão');
   await page.fill('#nKn','Inter'); await page.fill('#nKf','25'); await page.fill('#nKv','5'); await page.click('[data-act="addCartao"]');
   let s = await lerEstado(page);
@@ -495,12 +501,52 @@ test('CSV com mais de um cartão pergunta de qual cartão é a fatura', async()=
 
 test('cor do cartão: escolher em Ajustes muda o cartão no Início', async()=>{
   const {page, ctx, errors} = await abrir(estado());
-  await aba(page,'ajustes');
+  await aba(page,'ajustes'); await secao(page,'cartoes');
   await page.click('[data-act="corCartao"][data-id="k1"][data-v="oceano"]');
   assert.equal((await lerEstado(page)).cartoes[0].cor, 'oceano');
   await aba(page,'inicio');
   assert.ok(await page.$('.ccard.cc-oceano'));
   assert.equal(await page.evaluate(()=>getComputedStyle(document.body).fontFamily.includes('Hanken')), true, 'fonte do app carregada');
   assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('modo escuro/claro: botão alterna, lembra a escolha e sem escolha segue o sistema', async()=>{
+  const {page, ctx, errors} = await abrir(estado());
+  const tema = () => page.evaluate(()=>document.documentElement.dataset.theme);
+  const fundo = () => page.evaluate(()=>getComputedStyle(document.body).backgroundColor);
+  assert.equal(await tema(), 'light', 'o navegador de teste está em tema claro');
+  const claro = await fundo();
+  await page.click('#temaBtn');
+  assert.equal(await tema(), 'dark');
+  assert.equal(await page.getAttribute('#temaBtn','aria-label'), 'Ativar modo claro');
+  await page.waitForTimeout(500);
+  assert.notEqual(await fundo(), claro, 'o fundo muda de cor');
+  assert.equal(await page.getAttribute('meta[name="theme-color"]','content'), '#000000');
+  await page.reload(); await page.waitForSelector('#view .card');
+  assert.equal(await tema(), 'dark', 'a escolha continua depois de reabrir');
+  // sem escolha salva, acompanha o sistema
+  await page.evaluate(()=>localStorage.removeItem('meucaixa.tema'));
+  await page.emulateMedia({colorScheme:'dark'}); await page.reload(); await page.waitForSelector('#view .card');
+  assert.equal(await tema(), 'dark');
+  await page.emulateMedia({colorScheme:'light'});
+  await page.waitForFunction(()=>document.documentElement.dataset.theme==='light', null, {timeout:3000});
+  assert.equal((await lerEstado(page)).tema, undefined, 'a preferência não entra no backup');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('Início limpo: detalhes e seções começam fechados e abrem com um toque', async()=>{
+  const {page, ctx} = await abrir(estado({gastos:[{id:'g1', data:iso(0), valor:80, cat:'mercado', meio:'pix', desc:'feira', criado:1}]}));
+  assert.equal(await page.isVisible('.hero .legend'), false);
+  assert.equal(await page.isVisible('[data-fold="cats"] .cat'), false);
+  await page.click('.hero summary');
+  assert.ok(await page.isVisible('.hero .legend'));
+  await secao(page,'cats');
+  assert.ok(await page.isVisible('[data-fold="cats"] .cat'));
+  // continuam abertas depois de mudar de mês e voltar
+  await page.click('[data-act="mes"][data-d="-1"]'); await page.click('[data-act="mes"][data-d="1"]');
+  assert.ok(await page.isVisible('.hero .legend'));
+  assert.ok(await page.isVisible('[data-fold="cats"] .cat'));
   await ctx.close();
 });

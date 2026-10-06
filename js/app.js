@@ -8,6 +8,8 @@ document.addEventListener('click', e=>{ const b=e.target.closest('[data-act]'); 
 document.addEventListener('keydown', e=>{ if(e.key==='Enter' && ui.tab==='lancar' && e.target.tagName==='INPUT' && !e.target.closest('dialog')) A.saveG(); });
 // busca e filtros do Início: atualiza só a lista, sem perder o foco
 document.addEventListener('input', e=>{ const f = e.target.dataset?.filtro; if(!f) return; ui.busca[f] = e.target.value; renderLista(); });
+// lembra quais seções recolhíveis estão abertas, para continuarem assim depois de salvar algo
+document.addEventListener('toggle', e=>{ const id = e.target.dataset?.fold; if(!id) return; if(e.target.open) ui.abertos.add(id); else ui.abertos.delete(id); }, true);
 initImports();
 save();
 render();

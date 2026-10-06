@@ -15,8 +15,8 @@
   --nav-bg:rgba(0,0,0,.86);
   color-scheme:dark;
 }
-@media (prefers-color-scheme: light){
-  :root{
+/* o tema vem de data-theme no <html>, definido por js/tema.js (escolha salva ou tema do sistema) */
+:root[data-theme=light]{
     --bg:#eeede5;--surface:#f8f7f1;--surface-2:#e4e2d7;--line:#d6d4c8;--ink:#15302a;--mut:#5f6b63;
     --accent:#d4f25a;--on-accent:#15302a;--lav:#c9b8f7;--on-lav:#15302a;
     --pos:#1f7a4c;--neg:#c2412d;--amb:#a85f00;--blue:#2462c9;
@@ -24,7 +24,6 @@
     --display:"Instrument Serif",Georgia,serif;--display-w:400;--display-track:-.02em;
     --nav-bg:rgba(238,237,229,.92);
     color-scheme:light;
-  }
 }
 
 /* ---------- base ---------- */
@@ -46,19 +45,38 @@ header .wrap{display:flex;align-items:center;justify-content:space-between;gap:8
 h1{font-size:19px;font-weight:700;letter-spacing:-.02em}
 h1 span{color:var(--mut);font-weight:500}
 .mes{display:flex;align-items:center;background:var(--surface);border-radius:var(--r-pill);padding:3px}
-.mes b{font-weight:600;font-size:14px;min-width:116px;text-align:center}
+.topo-dir{display:flex;align-items:center;gap:8px}
+.mes b{font-weight:600;font-size:14px;min-width:104px;text-align:center}
 .mes b::first-letter{text-transform:uppercase}
 .ib{background:none;border:0;width:32px;height:32px;border-radius:var(--r-pill);font-size:18px;cursor:pointer;color:var(--mut)}
 .ib:hover{color:var(--ink);background:var(--surface-2)}
 main{padding-top:6px}
 
+/* botão lua/sol: no escuro mostra o sol (ir para o claro), no claro mostra a lua */
+.tema{position:relative;flex:none;width:38px;height:38px;border:0;border-radius:50%;background:var(--surface);cursor:pointer;overflow:hidden;
+  transition:background-color .3s,transform .15s}
+.tema:active{transform:scale(.9)}
+.tema svg{position:absolute;left:9px;top:9px;width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;
+  transition:transform .5s cubic-bezier(.2,.9,.25,1.2),opacity .3s}
+.tema .sol{color:#ffc94d}
+.tema .lua{color:var(--ink);fill:currentColor;stroke-width:0}
+[data-theme=dark] .tema .lua,:root:not([data-theme]) .tema .lua{opacity:0;transform:rotate(-120deg) scale(.3)}
+[data-theme=light] .tema .sol{opacity:0;transform:rotate(120deg) scale(.3)}
+[data-theme=light] .tema{border-radius:6px;background:var(--surface-2)}
+/* troca de tema suave (a classe só existe durante a troca) */
+html.trocando,html.trocando *{transition:background-color .35s,color .35s,border-color .35s!important}
+
 /* ---------- superfícies ---------- */
 .card{background:var(--surface);border-radius:var(--r-card);padding:18px}
-@media (prefers-color-scheme: light){.card{border:1px solid var(--line)}}
+[data-theme=light] .card{border:1px solid var(--line)}
 .card h2{font-size:15px;font-weight:600;color:var(--ink);margin-bottom:12px;letter-spacing:-.01em}
 .sec-h{display:flex;justify-content:space-between;align-items:baseline;margin:22px 2px 10px}
 .sec-h h2{font-size:19px;font-weight:650;letter-spacing:-.02em}
 .sec-h .sm{color:var(--mut)}
+.sec-h .ib{width:34px;height:34px;display:grid;place-items:center;align-self:center}
+.sec-h .ib svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round}
+.sec-h .ib.on{color:var(--ink);background:var(--surface)}
+.busca{margin-bottom:10px}
 .big{font-family:var(--display);font-weight:var(--display-w);font-size:38px;letter-spacing:var(--display-track);line-height:1.05}
 .big .cents{color:var(--mut)}
 .row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
@@ -68,7 +86,17 @@ main{padding-top:6px}
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px;vertical-align:1px}
 .empty{color:var(--mut);font-size:14px;text-align:center;padding:14px 0}
 p.note{font-size:13px;color:var(--mut);margin-top:8px}
-.banner{background:color-mix(in srgb,var(--amb) 14%,var(--surface));color:var(--ink);padding:12px 14px;border-radius:var(--r-ctl);font-size:14px}
+.fold{padding:0;margin-top:10px}
+.fold>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:10px;padding:16px 18px;font-weight:600;font-size:15px}
+.fold>summary::-webkit-details-marker{display:none}
+.fold>summary .sm{color:var(--mut);font-weight:450;white-space:nowrap}
+.fold>summary::after{content:"";flex:none;width:7px;height:7px;border:solid var(--mut);border-width:0 1.6px 1.6px 0;transform:rotate(45deg) translateY(-2px);transition:transform .25s}
+.fold[open]>summary::after{transform:rotate(-135deg) translate(-2px,0)}
+.fold>summary span:first-child{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.fold>.fold-c{padding:0 18px 18px}
+.fold[open]>.fold-c{animation:sobe .22s ease-out}
+.fold .fold-c>.note:first-child{margin-top:0}
+.banner{background:color-mix(in srgb,var(--amb) 14%,var(--surface));color:var(--ink);padding:11px 14px;border-radius:var(--r-ctl);font-size:13.5px;line-height:1.4}
 .banner a{color:var(--amb);font-weight:650;cursor:pointer;white-space:nowrap}
 
 /* ---------- herói: sobra do mês ---------- */
@@ -76,7 +104,14 @@ p.note{font-size:13px;color:var(--mut);margin-top:8px}
 .hero .lbl{color:var(--mut);font-size:14px}
 .hero .big{font-size:48px;margin:4px 0 2px}
 .hero .sub{color:var(--mut);font-size:13.5px}
-.stack{display:flex;gap:3px;height:10px;margin:16px 0 12px}
+.hero summary{list-style:none;cursor:pointer}
+.hero summary::-webkit-details-marker{display:none}
+.hero .mais{display:flex;align-items:center;justify-content:center;gap:4px;color:var(--mut);font-size:12.5px;margin-top:-2px}
+.hero .mais::after{content:"";width:6px;height:6px;border:solid currentColor;border-width:0 1.6px 1.6px 0;transform:translateY(-2px) rotate(45deg);transition:transform .25s}
+.hero[open] .mais::after{transform:translateY(1px) rotate(-135deg)}
+.hero .det{margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+.hero .det .row{padding:8px 0}
+.stack{display:flex;gap:3px;height:8px;margin:16px 0 12px}
 .stack i{display:block;border-radius:var(--r-pill);min-width:4px;transform-origin:left;animation:cresce .7s cubic-bezier(.2,.8,.2,1) both}
 .stack i:nth-child(2){animation-delay:.05s}.stack i:nth-child(3){animation-delay:.1s}.stack i:nth-child(4){animation-delay:.15s}.stack i:nth-child(5){animation-delay:.2s}
 @keyframes cresce{from{transform:scaleX(0)}}
@@ -85,12 +120,6 @@ p.note{font-size:13px;color:var(--mut);margin-top:8px}
 .legend span{color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .legend b{font-weight:600;white-space:nowrap}
 
-/* ---------- ações rápidas ---------- */
-.acts{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
-.acts button{background:var(--surface);border:0;border-radius:var(--r-ctl);padding:12px 4px 10px;display:flex;flex-direction:column;align-items:center;gap:6px;font-size:12.5px;cursor:pointer;color:var(--ink)}
-@media (prefers-color-scheme: light){.acts button{border:1px solid var(--line)}}
-.acts svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-.acts button:first-child{background:var(--accent);color:var(--on-accent);border-color:transparent}
 
 /* ---------- cartões de crédito ---------- */
 .carteira{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;margin:0 -16px;padding:0 16px 4px;scrollbar-width:none}
@@ -111,7 +140,7 @@ p.note{font-size:13px;color:var(--mut);margin-top:8px}
 .ccard .bottom{display:flex;justify-content:space-between;align-items:flex-end;gap:10px;font-size:12.5px;position:relative;z-index:1}
 .ccard .bottom span{opacity:.8}
 .ccard .bottom b{font-weight:600}
-.cc-dica{font-size:13px;color:var(--mut);margin:10px 4px 0;line-height:1.45}
+.cc-dica{font-size:13px;color:var(--mut);margin:8px 4px 0;line-height:1.45}
 .cc-dica b{color:var(--ink);font-weight:600}
 .cc-dica .hoje{color:var(--pos)}
 .cc-brasa{background:linear-gradient(135deg,#2a0d0a 0%,#8f1d14 48%,#ff6a1a 100%)}
@@ -150,7 +179,7 @@ p.note{font-size:13px;color:var(--mut);margin-top:8px}
 
 /* ---------- lançamentos ---------- */
 .ico{flex:none;width:38px;height:38px;border-radius:12px;display:grid;place-items:center;font-weight:700;font-size:14px;margin-right:12px;color:#fff}
-@media (prefers-color-scheme: light){.ico{border-radius:4px}}
+[data-theme=light] .ico{border-radius:4px}
 .lanc{display:flex;align-items:center;min-width:0}
 .lanc .t{min-width:0}
 .lanc .t div{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:550}
@@ -161,13 +190,13 @@ p.note{font-size:13px;color:var(--mut);margin-top:8px}
 /* ---------- formulários ---------- */
 label{display:block;font-size:13px;color:var(--mut);margin:14px 0 6px}
 input,select{width:100%;background:var(--surface-2);border:1px solid transparent;color:var(--ink);border-radius:var(--r-ctl);padding:12px 14px;font-size:16px;font-family:inherit}
-@media (prefers-color-scheme: light){input,select{background:#fff;border-color:var(--line)}}
+[data-theme=light] input,[data-theme=light] select{background:#fff;border-color:var(--line)}
 input:focus,select:focus{outline:2px solid var(--lav);outline-offset:0}
 input[type=search]{-webkit-appearance:none;appearance:none;border-radius:var(--r-pill)}
-@media (prefers-color-scheme: light){input[type=search]{border-radius:var(--r-ctl)}}
+[data-theme=light] input[type=search]{border-radius:var(--r-ctl)}
 input[type=color]{flex:none;width:36px;height:36px;padding:3px;border-radius:10px;cursor:pointer}
 .valor{font-family:var(--display);font-weight:var(--display-w);font-size:42px;letter-spacing:var(--display-track);text-align:center;padding:16px;background:none;border:0}
-@media (prefers-color-scheme: light){.valor{background:none;border:0;border-bottom:1px solid var(--line);border-radius:0}}
+[data-theme=light] .valor{background:none;border:0;border-bottom:1px solid var(--line);border-radius:0}
 .valor:focus{outline:0}
 .two-in{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .chips{display:flex;flex-wrap:wrap;gap:8px}
@@ -195,7 +224,7 @@ nav button svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width
 nav button.on{color:var(--ink);font-weight:650}
 nav button.plus,nav button.plus.on{color:var(--on-accent)}
 nav .plus span.c{background:var(--accent);width:52px;height:52px;border-radius:50%;display:grid;place-items:center;margin-top:-20px;box-shadow:0 8px 24px -6px color-mix(in srgb,var(--accent) 60%,transparent)}
-@media (prefers-color-scheme: light){nav .plus span.c{border-radius:6px;border:1px solid var(--ink)}}
+[data-theme=light] nav .plus span.c{border-radius:6px;border:1px solid var(--ink)}
 
 /* ---------- avisos e diálogo ---------- */
 #toast{position:fixed;left:50%;bottom:110px;transform:translateX(-50%) translateY(20px);background:var(--ink);color:var(--bg);padding:11px 18px;border-radius:var(--r-pill);font-size:14px;font-weight:550;opacity:0;transition:.25s;pointer-events:none;z-index:9;max-width:90vw;text-align:center}

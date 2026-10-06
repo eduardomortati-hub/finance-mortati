@@ -41,6 +41,12 @@ function lerCats(){
 export const A = {
   tab(d){ ui.tab=d.t; ui.editId=null; ui.editG=null; render(); },
   mes(d){ ui.mes=addM(ui.mes, Number(d.d)); render(); },
+  tema(){ window.alternarTema?.(); render(); },
+  busca(){
+    const {q, cat, meio} = ui.busca;
+    if(ui.buscaAberta || q || cat || meio){ ui.buscaAberta = false; ui.busca = {q:'', cat:'', meio:''}; render(); }   // fechar a lupa limpa a busca
+    else { ui.buscaAberta = true; render(); $('[data-filtro="q"]')?.focus(); }
+  },
   dTipo(d){ ui.draft.tipo=d.v; keepDraft(); },
   novo(d){ ui.draft.tipo=d.v; ui.editG=null; ui.tab='lancar'; render(); },
   dCat(d){ ui.draft.cat=d.id; keepDraft(); },
@@ -102,7 +108,7 @@ export const A = {
   },
 
   editR(d){ ui.editId=d.id; render(); setTimeout(()=>$('#rNome').scrollIntoView({behavior:'smooth',block:'center'}),50); },
-  cancelR(){ ui.editId=null; render(); },
+  cancelR(){ ui.editId=null; ui.abertos.delete('addR'); render(); },
   saveR(){
     const nome=$('#rNome').value.trim().slice(0,80), valor=parseNum($('#rValor').value), tipo=$('#rTipo').value, parcelas=parseInt($('#rParc').value,10);
     const inicio = $('#rIni').value || thisMonth(), fim = $('#rFim').value || null;
@@ -130,6 +136,7 @@ export const A = {
       const n = {id:uid(), ...obj}; if(fim) n.fim = fim;
       S.recorrentes.push(n); toast('Salvo ✓');
     }
+    if(ui.editId) ui.abertos.delete('addR');   // terminou a edição: o formulário volta a ficar recolhido
     ui.editId=null; save(); render();
   },
   // encerrar: continua nos meses passados e sai a partir do próximo

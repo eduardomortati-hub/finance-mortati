@@ -5,12 +5,15 @@ import { $, esc, fmt, todayISO, thisMonth, addM, diffM, mLabel, dLabel, sum, nor
 
 // estado da interface (não é salvo)
 export const ui = {tab:'inicio', mes:thisMonth(), draft:{tipo:'gasto', cat:null, meio:'cartao', parcelado:false},
-  editId:null, editG:null, busca:{q:'', cat:'', meio:''}};
+  editId:null, editG:null, busca:{q:'', cat:'', meio:''}, buscaAberta:false,
+  abertos:new Set()};   // seções recolhíveis que a pessoa abriu (data-fold)
 
 const ymBR = k => mLabel(k,true)+'/'+k.slice(2,4);
 const dot = c => `<span class="dot" style="background:${c}"></span>`;
 const chip = (on, act, id, txt) => `<button class="chip ${on?'on':''}" aria-pressed="${on}" data-act="${act}" data-id="${esc(id)}">${txt}</button>`;
 const banner = t => `<div class="banner" style="margin-bottom:12px">${t}</div>`;
+// seção recolhível (fechada por padrão, para a tela ficar limpa); `abrir` força aberta
+const fold = (id, titulo, lado, corpo, abrir=false) => `<details class="card fold" data-fold="${id}" ${abrir || ui.abertos.has(id) ? 'open' : ''}><summary><span>${titulo}</span>${lado ? `<span class="sm">${lado}</span>` : ''}</summary><div class="fold-c">${corpo}</div></details>`;
 const emDias = n => n===0 ? 'hoje' : n===1 ? 'amanhã' : `em ${n} dias`;
 // meio de pagamento para exibir: com mais de um cartão, mostra o nome do cartão
 export const meioLabel = x => x.meio==='cartao' && S.cartoes.length>1 ? cartaoOf(x.cartao).nome : meioOf(x.meio);
@@ -24,6 +27,7 @@ export function render(){
   });
   $('#mesBox').style.visibility = ui.tab==='inicio' ? 'visible' : 'hidden';
   $('#mesLbl').textContent = mLabel(ui.mes);
+  $('#temaBtn').setAttribute('aria-label', document.documentElement.dataset.theme==='light' ? 'Ativar modo escuro' : 'Ativar modo claro');
   $('#view').innerHTML = ({inicio:vInicio, lancar:vLancar, fixos:vFixos, metas:vMetas, ajustes:vAjustes})[ui.tab]();
   if(ui.tab==='inicio') renderLista();
   if(ui.tab==='lancar'){ const v=$('#gValor'); if(v && !v.value) setTimeout(()=>v.focus(),50); }
@@ -52,14 +56,9 @@ export const valorHTML = v => { const s = fmt(v), i = s.lastIndexOf(','); return
 const inicial = s => esc((String(s).trim()[0] || '?').toUpperCase());
 const corCartao = k => 'cc-' + (CORES_CARTAO.includes(k.cor) ? k.cor : CORES_CARTAO[0]);
 const secH = (titulo, lado='', id='') => `<div class="sec-h"><h2${id?` id="${id}"`:''}>${titulo}</h2><span class="sm">${lado}</span></div>`;
-const ICON = {
-  gasto:'<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
-  entrada:'<svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg>',
-  csv:'<svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></svg>',
-  backup:'<svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>'
-};
+const BUSCA = '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>';
 
-// sobra do mês: número grande + barra mostrando para onde vai o que entra
+// sobra do mês: número grande + barra mostrando para onde vai o que entra; o resto abre em "Detalhes"
 function vHero(c){
   const receita = c.renda + c.entradas;
   const partes = [
@@ -71,22 +70,27 @@ function vHero(c){
   ];
   const base = Math.max(1, sum(partes, p=>p[1]));
   const sub = receita ? `de ${fmt(receita)} que entram no mês` : 'Lance suas entradas no + ou defina sua renda em Ajustes';
-  return `<div class="card hero">
+  // faturas que vencem no mês escolhido, por cartão
+  const faturas = c.porCartao.filter(x=>!x.cartao.arquivado || x.total);
+  const linhas = faturas.map(x=>{
+    const p = faturaPeriodo(ui.mes, x.cartao);
+    return `<div class="row"><div class="lanc"><span class="ico ${corCartao(x.cartao)}">${inicial(x.cartao.nome)}</span><div class="t"><div>${esc(x.cartao.nome)}</div><small>vence ${dLabel(vencimentoData(ui.mes, x.cartao))}, compras de ${dLabel(p.ini)} a ${dLabel(p.fim)}</small></div></div><b>${fmt(x.total)}</b></div>`;
+  }).join('');
+  return `<details class="card hero" data-fold="hero" ${ui.abertos.has('hero')?'open':''}><summary>
     <div class="lbl">${c.sobra>=0 ? 'Sobra prevista' : 'Vai faltar'}</div>
     <div class="big ${c.sobra>=0?'':'neg'}">${valorHTML(c.sobra)}</div>
     <div class="sub">${sub}</div>
     <div class="stack" aria-hidden="true">${partes.filter(p=>p[1]>0).map(p=>`<i style="flex:${p[1]/base};background:${p[2]}"></i>`).join('')}</div>
-    <div class="legend">
-      ${partes.slice(0,4).filter(p=>p[1]>0 || p[0]!=='Metas').map(p=>`<div><span><i class="dot" style="background:${p[2]}"></i>${p[0]}</span><b>${fmt(p[1])}</b></div>`).join('')}
-      ${c.guardado<0 ? `<div><span>Retirado de metas</span><b class="pos">+ ${fmt(-c.guardado)}</b></div>` : ''}
+    <div class="mais">Detalhes</div></summary>
+    <div class="det">
+      <div class="legend">
+        ${partes.slice(0,4).filter(p=>p[1]>0 || p[0]!=='Metas').map(p=>`<div><span><i class="dot" style="background:${p[2]}"></i>${p[0]}</span><b>${fmt(p[1])}</b></div>`).join('')}
+        ${c.guardado<0 ? `<div><span>Retirado de metas</span><b class="pos">+ ${fmt(-c.guardado)}</b></div>` : ''}
+      </div>
+      ${linhas ? `<div style="margin-top:10px">${linhas}</div>` : ''}
+      ${c.faturaFixos ? `<p class="note">A fatura inclui ${fmt(c.faturaFixos)} de parcelas e fixos no cartão.</p>` : ''}
     </div>
-  </div>
-  <div class="acts">
-    <button data-act="novo" data-v="gasto">${ICON.gasto}Gasto</button>
-    <button data-act="novo" data-v="entrada">${ICON.entrada}Entrada</button>
-    <button data-act="pickCsv">${ICON.csv}Fatura CSV</button>
-    <button data-act="export">${ICON.backup}Backup</button>
-  </div>`;
+  </details>`;
 }
 
 // os cartões como cartões físicos: quanto pagar, quando vence e o melhor dia de compra
@@ -101,8 +105,8 @@ function vCarteira(){
       ? `<div><span>Próxima fatura</span><br><b>${fmt(i.valorAberta)}</b></div><div style="text-align:right"><span>Fecha</span><br><b>${dLabel(i.fechaEm)}</b></div>`
       : `<div><span>Fecha</span><br><b>${dLabel(i.fechaEm)}</b></div><div style="text-align:right"><span>Faltam</span><br><b>${i.diasFecha} dia${i.diasFecha===1?'':'s'}</b></div>`;
     const dica = i.hojeEhMelhor
-      ? `<b class="hoje">Hoje é o melhor dia de compra.</b> O que comprar hoje só vence em ${dLabel(i.pagaHoje)}: ${i.diasHoje} dias para pagar.`
-      : `Comprando hoje, você paga em ${dLabel(i.pagaHoje)} (${i.diasHoje} dias). <b>Melhor dia de compra: ${dLabel(i.melhorDia)}</b>, que só vence em ${dLabel(i.pagaMelhor)} (${i.diasMelhor} dias).`;
+      ? `<b class="hoje">Hoje é o melhor dia de compra</b> · ${i.diasHoje} dias para pagar`
+      : `Melhor dia de compra: <b>${dLabel(i.melhorDia)}</b> · ${i.diasMelhor} dias para pagar`;
     return `<div class="cc-col">
       <div class="ccard ${corCartao(k)}">
         <div class="top"><span class="nome">${esc(k.nome)}</span><span class="dias">fecha dia ${k.fechamento}<br>vence dia ${k.vencimento}</span></div>
@@ -112,21 +116,8 @@ function vCarteira(){
       <p class="cc-dica">${dica}</p>
     </div>`;
   });
-  return secH(ativos.length>1 ? 'Seus cartões' : 'Seu cartão', ativos.length>1 ? 'deslize para ver os outros' : '')
+  return secH(ativos.length>1 ? 'Seus cartões' : 'Seu cartão', ativos.length>1 ? 'deslize →' : '')
     + `<div class="carteira ${ativos.length>1?'':'um'}">${cols.join('')}</div>`;
-}
-
-// faturas que vencem no mês escolhido, por cartão
-function vFaturasMes(c){
-  const faturas = c.porCartao.filter(x=>!x.cartao.arquivado || x.total);
-  const linhas = faturas.map(x=>{
-    const p = faturaPeriodo(ui.mes, x.cartao);
-    return `<div class="row"><div class="lanc"><span class="ico ${corCartao(x.cartao)}">${inicial(x.cartao.nome)}</span><div class="t"><div>${esc(x.cartao.nome)}</div><small>vence ${dLabel(vencimentoData(ui.mes, x.cartao))}, compras de ${dLabel(p.ini)} a ${dLabel(p.fim)}</small></div></div><b>${fmt(x.total)}</b></div>`;
-  }).join('');
-  const receita = c.renda + c.entradas, pct = receita ? Math.round(c.fatura/receita*100) : 0;
-  return secH(faturas.length>1 ? 'Faturas do mês' : 'Fatura do mês', fmt(c.fatura))
-    + `<div class="card">${linhas}
-      <p class="note">${c.faturaFixos ? `Inclui ${fmt(c.faturaFixos)} de parcelas e fixos no cartão. ` : ''}${receita ? `${pct}% do que entra no mês vai para o cartão.` : ''}</p></div>`;
 }
 
 function vHistorico(){
@@ -134,16 +125,15 @@ function vHistorico(){
   const vals = meses.map(k=>calc(k).saidas), mx = Math.max(1,...vals);
   const comDados = vals.filter(v=>v>0), media = comDados.length ? sum(comDados,x=>x)/comDados.length : 0;
   const curto = v => v>=10000 ? (v/1000).toLocaleString('pt-BR',{maximumFractionDigits:1})+' mil' : Math.round(v).toLocaleString('pt-BR');
-  return secH('Últimos 6 meses', media ? `média de ${fmt(media)}` : '')
-    + `<div class="card"><div class="pills">${meses.map((k,i)=>`<div class="${k===ui.mes?'atual':''}"><span class="v">${curto(vals[i])}</span><i style="height:${Math.max(6, vals[i]/mx*100)}%"></i><span class="m">${mLabel(k,true)}</span></div>`).join('')}</div>
-      <p class="note">Tudo o que saiu: faturas, fixos fora do cartão e pix, débito e dinheiro.</p></div>`;
+  return fold('hist', 'Últimos 6 meses', media ? `média ${fmt(media)}` : '', `<div class="pills">${meses.map((k,i)=>`<div class="${k===ui.mes?'atual':''}"><span class="v">${curto(vals[i])}</span><i style="height:${Math.max(6, vals[i]/mx*100)}%"></i><span class="m">${mLabel(k,true)}</span></div>`).join('')}</div>
+      <p class="note">Tudo o que saiu: faturas, fixos fora do cartão e pix, débito e dinheiro.</p>`);
 }
 
 function vCategorias(c){
   const ant = addM(ui.mes,-1), prev = calc(ant).porCat, antLbl = mLabel(ant,true);
   const cats = Object.entries(c.porCat).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);
   const maxV = Math.max(1, ...cats.map(x=>x[1]), ...Object.values(S.limites).map(Number));
-  let h = secH('Para onde foi', mLabel(ui.mes)) + `<div class="card">`;
+  let h = '';
   if(!cats.length) h += `<div class="empty">Nenhum gasto neste mês ainda.</div>`;
   cats.forEach(([id,v])=>{
     const ct = catOf(id), lim = Number(S.limites[id])||0, p0 = prev[id]||0;
@@ -153,22 +143,25 @@ function vCategorias(c){
     const w = lim ? Math.min(100, v/lim*100) : v/maxV*100;
     h += `<div class="cat"><div class="top"><span>${dot(ct.c)}${esc(ct.n)}${delta}</span><span><b>${fmt(v)}</b>${extra}</span></div><div class="bar"><i style="width:${w}%;background:${cor}"></i></div></div>`;
   });
-  return h + `</div>`;
+  return fold('cats', 'Para onde foi', cats.length ? fmt(sum(cats, x=>x[1])) : '', h);
 }
 
 function vInicio(){
   const c = calc(ui.mes);
   let h = avisos() + vHero(c);
   if(ui.mes===thisMonth()) h += vCarteira();
-  h += vFaturasMes(c) + vHistorico() + vCategorias(c);
-  const meiosF = MEIOS.filter(m=>m.id!=='boleto');
-  h += secH('', '', 'listaTit') + `<div class="card">
-    <input data-filtro="q" type="search" placeholder="Buscar em todos os meses" value="${esc(ui.busca.q)}" autocomplete="off" aria-label="Buscar lançamentos">
+  h += `<div style="margin-top:22px">${vCategorias(c)}${vHistorico()}</div>`;
+  // lista do mês; a busca e os filtros só aparecem pela lupa
+  const meiosF = MEIOS.filter(m=>m.id!=='boleto'), {q, cat, meio} = ui.busca;
+  const buscando = ui.buscaAberta || !!(q || cat || meio);
+  h += `<div class="sec-h"><h2 id="listaTit"></h2><button class="ib ${buscando?'on':''}" data-act="busca" aria-label="Buscar lançamentos" aria-expanded="${buscando}">${BUSCA}</button></div>`;
+  if(buscando) h += `<div class="busca">
+    <input data-filtro="q" type="search" placeholder="Buscar em todos os meses" value="${esc(q)}" autocomplete="off" aria-label="Buscar lançamentos">
     <div class="two-in" style="margin-top:8px">
-      <select data-filtro="cat" aria-label="Filtrar por categoria"><option value="">Todas as categorias</option>${S.cats.map(c=>`<option value="${esc(c.id)}" ${ui.busca.cat===c.id?'selected':''}>${esc(c.n)}</option>`).join('')}</select>
-      <select data-filtro="meio" aria-label="Filtrar por meio de pagamento"><option value="">Todos os meios</option>${meiosF.map(m=>`<option value="${m.id}" ${ui.busca.meio===m.id?'selected':''}>${m.n}</option>`).join('')}<option value="entrada" ${ui.busca.meio==='entrada'?'selected':''}>Só entradas</option></select>
-    </div>
-    <div id="lista" style="margin-top:6px"></div></div>`;
+      <select data-filtro="cat" aria-label="Filtrar por categoria"><option value="">Todas as categorias</option>${S.cats.map(c=>`<option value="${esc(c.id)}" ${cat===c.id?'selected':''}>${esc(c.n)}</option>`).join('')}</select>
+      <select data-filtro="meio" aria-label="Filtrar por meio de pagamento"><option value="">Todos os meios</option>${meiosF.map(m=>`<option value="${m.id}" ${meio===m.id?'selected':''}>${m.n}</option>`).join('')}<option value="entrada" ${meio==='entrada'?'selected':''}>Só entradas</option></select>
+    </div></div>`;
+  h += `<div class="card" style="padding-top:6px;padding-bottom:6px"><div id="lista"></div></div>`;
   return h;
 }
 
@@ -308,12 +301,12 @@ function vFixos(){
     <div class="card"><h2>Parcelamentos</h2>${par.length?par.map(line).join(''):'<div class="empty">Nenhum.</div>'}</div>
     <div class="card"><h2>Fixos mensais</h2>${fix.length?fix.map(line).join(''):'<div class="empty">Nenhum.</div>'}</div>
   </div>`;
-  if(enc.length) h += `<div class="card" style="margin-top:12px"><h2>Encerrados (${enc.length})</h2>
-    <p class="note" style="margin:0 0 6px">Continuam contando nos meses em que estavam ativos. O × apaga de vez, inclusive do histórico.</p>${enc.map(line).join('')}</div>`;
+  if(enc.length) h += fold('enc', `Encerrados (${enc.length})`, '',
+    `<p class="note" style="margin:0 0 6px">Continuam contando nos meses em que estavam ativos. O × apaga de vez, inclusive do histórico.</p>${enc.map(line).join('')}`);
 
   const e = S.recorrentes.find(r=>r.id===ui.editId) || null;
-  h += `<div class="card" style="margin-top:12px"><h2>${e?'Editar':'Adicionar'} fixo ou parcela</h2>
-    <label for="rNome">Nome</label><input id="rNome" value="${esc(e?.nome||'')}" placeholder="ex: Academia">
+  h += fold('addR', `${e?'Editar':'Adicionar'} fixo ou parcela`, '', `
+    <label for="rNome" style="margin-top:0">Nome</label><input id="rNome" value="${esc(e?.nome||'')}" placeholder="ex: Academia">
     <div class="two-in">
       <div><label for="rValor">Valor por mês</label><input id="rValor" inputmode="decimal" value="${e?valIn(e.valor)||'0':''}" placeholder="0,00"></div>
       <div><label for="rTipo">Tipo</label><select id="rTipo"><option value="fixo" ${e?.tipo==='fixo'?'selected':''}>Fixo (todo mês)</option><option value="parcela" ${e?.tipo==='parcela'?'selected':''}>Parcelado</option></select></div>
@@ -327,15 +320,14 @@ function vFixos(){
     </div>
     ${e && e.tipo==='fixo' ? '<p class="note">Reajuste: o valor antigo continua nos meses anteriores ao escolhido acima.</p>' : ''}
     <button class="btn" data-act="saveR">${e?'Salvar alterações':'Adicionar'}</button>
-    ${e ? `<button class="btn sec" data-act="cancelR">Cancelar edição</button><button class="btn dng" data-act="delR" data-id="${esc(e.id)}">Apagar de vez (também dos meses passados)</button>` : ''}
-  </div>`;
+    ${e ? `<button class="btn sec" data-act="cancelR">Cancelar edição</button><button class="btn dng" data-act="delR" data-id="${esc(e.id)}">Apagar de vez (também dos meses passados)</button>` : ''}`, !!e);
   return h;
 }
 
 /* ---------- Metas ---------- */
 function vMetas(){
   const metas = S.metas.filter(m=>!m.arquivada);
-  let h = `<div class="grid two">`;
+  let h = metas.length ? `<div class="grid two" style="margin-bottom:2px">` : `<div>`;
   metas.forEach(m=>{
     const p = m.alvo ? Math.min(100, m.atual/m.alvo*100) : 0;
     h += `<div class="card"><div style="display:flex;justify-content:space-between;align-items:start"><h2>${esc(m.nome)}</h2><button class="x" data-act="arqM" data-id="${esc(m.id)}" aria-label="Remover meta">×</button></div>
@@ -346,13 +338,13 @@ function vMetas(){
   });
   h += `</div>`;
   if(metas.length) h += `<p class="note" style="margin:8px 4px 0">O que você guarda sai da sobra do mês; o que retira volta para ela.</p>`;
-  h += `<div class="card" style="margin-top:12px"><h2>Nova meta</h2>
+  h += fold('novaM', 'Nova meta', '', `
     <div class="two-in"><div><label for="mNome">Nome</label><input id="mNome" placeholder="ex: Viagem"></div><div><label for="mAlvo">Valor alvo</label><input id="mAlvo" inputmode="decimal" placeholder="0,00"></div></div>
-    <button class="btn" data-act="saveM">Criar meta</button></div>`;
-  h += `<div class="card" style="margin-top:12px"><h2>Limite por categoria (por mês)</h2>
+    <button class="btn" data-act="saveM">Criar meta</button>`, !metas.length);
+  h += fold('lim', 'Limite por categoria', `${Object.keys(S.limites).length || 'nenhum'} por mês`, `
     <p class="note" style="margin:0 0 6px">Deixe vazio para não ter limite. No Início a barra fica amarela perto do limite e vermelha quando estoura.</p>
     ${S.cats.map(c=>`<div class="row"><span class="l">${dot(c.c)}${esc(c.n)}</span><input data-lim="${esc(c.id)}" inputmode="decimal" aria-label="Limite para ${esc(c.n)}" style="width:120px;padding:8px 10px;font-size:15px" value="${valIn(S.limites[c.id])}" placeholder="—"></div>`).join('')}
-    <button class="btn" data-act="saveLim">Salvar limites</button></div>`;
+    <button class="btn" data-act="saveLim">Salvar limites</button>`);
   return h;
 }
 
@@ -360,40 +352,39 @@ function vMetas(){
 const diasCartao = (af, av, k) => `<div class="two-in"><div><label>Dia de fechamento</label><input ${af} inputmode="numeric" value="${k?.fechamento ?? ''}" placeholder="ex: 5"></div><div><label>Dia de vencimento</label><input ${av} inputmode="numeric" value="${k?.vencimento ?? ''}" placeholder="ex: 12"></div></div>`;
 function vCartoesAjustes(){
   const ativos = cartoesAtivos(), removidos = S.cartoes.filter(k=>k.arquivado);
-  return `<div class="card" style="margin-top:12px"><h2>Cartões</h2>
+  return fold('cartoes', 'Cartões', ativos.length>1 ? `${ativos.length} cartões` : esc(ativos[0]?.nome||''), `
     <p class="note" style="margin:0 0 4px">Os dias de fechamento e vencimento estão no app do banco, na tela da fatura. Eles decidem em qual fatura cada compra cai e qual é o melhor dia de compra.</p>
     ${ativos.map(k=>`<div class="cartao-ed"><div class="row catrow"><input data-kn="${esc(k.id)}" value="${esc(k.nome)}" maxlength="40" aria-label="Nome do cartão">${ativos.length>1 ? `<button class="x" data-act="delCartao" data-id="${esc(k.id)}" aria-label="Remover cartão ${esc(k.nome)}">×</button>` : ''}</div>${diasCartao(`data-kf="${esc(k.id)}"`, `data-kv="${esc(k.id)}"`, k)}<div class="cores" role="group" aria-label="Cor do cartão ${esc(k.nome)}">${CORES_CARTAO.map(c=>`<button class="cc-${c} ${k.cor===c?'on':''}" aria-pressed="${k.cor===c}" data-act="corCartao" data-id="${esc(k.id)}" data-v="${c}" aria-label="${c}"></button>`).join('')}</div></div>`).join('')}
     <button class="btn" data-act="saveCartoes">Salvar cartões</button>
     <div class="cartao-ed" style="margin-top:16px"><label for="nKn">Adicionar cartão</label><input id="nKn" maxlength="40" placeholder="ex: Nubank, Inter, Itaú…">${diasCartao('id="nKf"', 'id="nKv"', null)}</div>
     <button class="btn sec" data-act="addCartao">Adicionar cartão</button>
-    ${removidos.length ? `<p class="note">Removidos (continuam nas faturas passadas): ${removidos.map(k=>esc(k.nome)).join(', ')}.</p>` : ''}
-  </div>`;
+    ${removidos.length ? `<p class="note">Removidos (continuam nas faturas passadas): ${removidos.map(k=>esc(k.nome)).join(', ')}.</p>` : ''}`, !S.config.configurado);
 }
 
 function vAjustes(){
   const c = S.config, d = diasSemBackup();
   const ultimo = d===null ? 'Nenhum backup feito ainda.' : `Último backup: ${dLabel(c.ultimoBackup)}/${c.ultimoBackup.slice(0,4)} (${d===0?'hoje':d===1?'ontem':`há ${d} dias`}).`;
-  return `<div class="card"><h2>Renda</h2>
-    <label for="cRenda">Renda fixa mensal (salário, pró-labore)</label><input id="cRenda" inputmode="decimal" value="${valIn(c.renda)||'0'}">
+  return `${fold('renda', 'Renda', fmt(c.renda), `
+    <label for="cRenda" style="margin-top:0">Renda fixa mensal (salário, pró-labore)</label><input id="cRenda" inputmode="decimal" value="${valIn(c.renda)||'0'}">
     <p class="note">Recebe valores que mudam todo mês (MEI, freelas, extras)? Lance cada recebimento como <b>Entrada</b> no botão +. Se toda a sua renda varia, deixe 0 aqui.</p>
-    <button class="btn" data-act="saveCfg">Salvar</button></div>
+    <button class="btn" data-act="saveCfg">Salvar</button>`, !S.config.configurado)}
 
   ${vCartoesAjustes()}
 
-  <div class="card" style="margin-top:12px"><h2>Categorias</h2>
+  ${fold('cats-ed', 'Categorias', String(S.cats.length), `
     <p class="note" style="margin:0 0 6px">Mude nome e cor, apague ou crie categorias. Ao apagar, os lançamentos dela vão para "Outros".</p>
     ${S.cats.map(k=>`<div class="row catrow"><input type="color" data-catc="${esc(k.id)}" value="${k.c}" aria-label="Cor de ${esc(k.n)}"><input data-catn="${esc(k.id)}" value="${esc(k.n)}" maxlength="40" aria-label="Nome da categoria">${k.id==='outros' ? '<span class="xph"></span>' : `<button class="x" data-act="delCat" data-id="${esc(k.id)}" aria-label="Apagar categoria ${esc(k.n)}">×</button>`}</div>`).join('')}
     <div class="row catrow"><input type="color" id="nCatC" value="#0ea5e9" aria-label="Cor da nova categoria"><input id="nCat" maxlength="40" placeholder="Nova categoria" aria-label="Nome da nova categoria"><button class="x" data-act="addCat" aria-label="Adicionar categoria">+</button></div>
-    <button class="btn" data-act="saveCats">Salvar categorias</button></div>
+    <button class="btn" data-act="saveCats">Salvar categorias</button>`)}
 
-  <div class="card" style="margin-top:12px"><h2>Importar extrato do cartão (CSV)</h2>
+  ${fold('csv', 'Importar fatura (CSV)', '', `
     <p class="note" style="margin-top:0">Baixe a fatura em CSV pelo internet banking e importe aqui. O app tenta achar data, descrição e valor sozinho, categoriza pelo nome do estabelecimento (iFood, posto, mercado…) e ignora linhas repetidas, estornos e o pagamento da fatura.</p>
-    <button class="btn sec" data-act="pickCsv">Escolher arquivo CSV</button></div>
+    <button class="btn sec" data-act="pickCsv">Escolher arquivo CSV</button>`)}
 
-  <div class="card" style="margin-top:12px"><h2>Seus dados</h2>
+  ${fold('dados', 'Backup e dados', d===null ? 'sem backup' : d===0 ? 'backup hoje' : `backup há ${d} d`, `
     <p class="note" style="margin-top:0">Tudo fica salvo só neste aparelho. Nada é enviado para lugar nenhum. Por isso, <b>exporte um backup de vez em quando</b> — e use o mesmo arquivo para passar os dados do PC para o celular (ou vice-versa).</p>
     <p class="note"><b>${ultimo}</b></p>
     <div class="btns"><button class="btn" data-act="export">Exportar backup</button><button class="btn sec" data-act="pickJson">Importar backup</button></div>
     <p class="note">${S.gastos.length} gastos · ${S.entradas.length} entradas · ${S.recorrentes.length} fixos/parcelas · ${S.metas.filter(m=>!m.arquivada).length} metas</p>
-    <button class="btn dng" data-act="reset">Apagar tudo e começar do zero</button></div>`;
+    <button class="btn dng" data-act="reset">Apagar tudo e começar do zero</button>`)}`;
 }

@@ -6,8 +6,7 @@
 <!-- Privacidade: o app não pode se conectar a nenhum servidor (connect-src 'none') nem carregar nada de fora. -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'none'; font-src 'self'; object-src 'none'; frame-src 'none'; media-src 'none'; base-uri 'none'; form-action 'none'; manifest-src 'self'; worker-src 'self'">
 <meta name="referrer" content="no-referrer">
-<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
-<meta name="theme-color" content="#eeede5" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Meu Caixa">
@@ -16,15 +15,22 @@
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="stylesheet" href="css/style.css">
+<script src="js/tema.js"></script>
 <script type="module" src="js/app.js"></script>
 </head>
 <body>
 <header><div class="wrap">
   <h1>Meu <span>Caixa</span></h1>
-  <div class="mes" id="mesBox">
-    <button class="ib" data-act="mes" data-d="-1" aria-label="Mês anterior">‹</button>
-    <b id="mesLbl"></b>
-    <button class="ib" data-act="mes" data-d="1" aria-label="Próximo mês">›</button>
+  <div class="topo-dir">
+    <div class="mes" id="mesBox">
+      <button class="ib" data-act="mes" data-d="-1" aria-label="Mês anterior">‹</button>
+      <b id="mesLbl"></b>
+      <button class="ib" data-act="mes" data-d="1" aria-label="Próximo mês">›</button>
+    </div>
+    <button class="tema" data-act="tema" id="temaBtn" aria-label="Modo escuro">
+      <svg class="sol" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg>
+      <svg class="lua" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14.6A8.5 8.5 0 0 1 9.4 3.5a8.5 8.5 0 1 0 11.1 11.1z"/></svg>
+    </button>
   </div>
 </div></header>
 
