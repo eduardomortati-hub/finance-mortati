@@ -1,14 +1,17 @@
-import { save } from './store.js';
-import { ui, render } from './views.js';
+import { save, loadError } from './store.js';
+import { ui, render, renderLista } from './views.js';
 import { A } from './actions.js';
 import { initImports } from './import.js';
-import { $ } from './util.js';
+import { $, toast } from './util.js';
 
 document.addEventListener('click', e=>{ const b=e.target.closest('[data-act]'); if(!b) return; e.preventDefault(); const f=A[b.dataset.act]; if(f) f(b.dataset,b); });
-document.addEventListener('keydown', e=>{ if(e.key==='Enter' && ui.tab==='lancar' && e.target.tagName==='INPUT') A.saveG(); });
+document.addEventListener('keydown', e=>{ if(e.key==='Enter' && ui.tab==='lancar' && e.target.tagName==='INPUT' && !e.target.closest('dialog')) A.saveG(); });
+// busca e filtros do Início: atualiza só a lista, sem perder o foco
+document.addEventListener('input', e=>{ const f = e.target.dataset?.filtro; if(!f) return; ui.busca[f] = e.target.value; renderLista(); });
 initImports();
 save();
 render();
+if(loadError) toast("Não consegui ler os dados salvos. Uma cópia foi guardada; restaure um backup em Ajustes.");
 
 // pede ao navegador para não apagar os dados quando faltar espaço
 navigator.storage?.persist?.().catch(()=>{});

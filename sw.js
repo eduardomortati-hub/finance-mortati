@@ -1,7 +1,8 @@
 // Service worker: guarda os arquivos do app no aparelho para abrir offline.
 // Só lida com arquivos do próprio app — os dados financeiros ficam no localStorage e nunca passam por aqui.
-// Ao publicar mudanças, aumente VERSION para o app oferecer a atualização.
-const VERSION = 'v1';
+// VERSION é um hash dos arquivos, gerado por tools/stamp-sw.mjs no pre-commit: qualquer mudança vira versão nova
+// e o app instalado oferece a atualização. Ao criar um arquivo novo, inclua-o em FILES.
+const VERSION = '58fae34288b7';
 const CACHE = 'meucaixa-' + VERSION;
 const FILES = [
   './',
@@ -15,6 +16,9 @@ const FILES = [
   './js/views.js',
   './js/actions.js',
   './js/import.js',
+  './js/model.js',
+  './js/crypto.js',
+  './js/modal.js',
   './icons/icon.svg',
   './icons/icon-192.png',
   './icons/icon-512.png',

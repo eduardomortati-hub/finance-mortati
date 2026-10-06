@@ -1,0 +1,15 @@
+{
+  "name": "meu-caixa",
+  "private": true,
+  "type": "module",
+  "description": "Controle financeiro pessoal em PWA. Os dados ficam só no aparelho.",
+  "scripts": {
+    "start": "npx --yes serve . -l 5174",
+    "test": "node tools/stamp-sw.mjs --check && node --test --test-concurrency=1 tests/*.test.mjs",
+    "icons": "node tools/make-icons.mjs",
+    "postinstall": "node tools/install-hooks.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.63.0"
+  }
+}

@@ -19,3 +19,10 @@ export function dLabel(iso){ const [y,m,d]=iso.split('-'); return d+'/'+m; }
 export const sum = (arr,f=x=>x.valor) => arr.reduce((a,x)=>a+(Number(f(x))||0),0);
 
 export function toast(t){ const el=$('#toast'); el.textContent=t; el.classList.add('show'); clearTimeout(toast._t); toast._t=setTimeout(()=>el.classList.remove('show'),2400); }
+
+// texto sem acentos e minúsculo, para busca
+export const normTxt = s => String(s ?? '').normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase();
+const isoDate = iso => { const [y,m,d] = iso.split('-').map(Number); return Date.UTC(y, m-1, d); };
+export const diasEntre = (a,b) => Math.round((isoDate(b)-isoDate(a))/864e5);
+export function addDias(iso,n){ const d = new Date(isoDate(iso) + n*864e5); return d.getUTCFullYear()+'-'+pad(d.getUTCMonth()+1)+'-'+pad(d.getUTCDate()); }
+export const valIn = v => v ? String(v).replace('.',',') : '';   // número -> texto para <input>

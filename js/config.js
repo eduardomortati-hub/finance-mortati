@@ -1,4 +1,5 @@
 export const KEY = 'meucaixa.v1';
+// categorias padrão; as do usuário ficam em S.cats (editáveis em Ajustes)
 export const CATS = [
   {id:'delivery', n:'Delivery / iFood', c:'#ef4444'},
   {id:'mercado',  n:'Mercado',          c:'#22c55e'},
@@ -27,5 +28,4 @@ export const RULES = [
   [/MERCADOLIVRE|MERCADO LIVRE|SHOPEE|AMAZON|MAGAZINE|SHEIN|ALIEXPRESS|AMERICANAS/i,'compras']
 ];
 
-export const catOf = id => CATS.find(c=>c.id===id) || CATS[CATS.length-1];
 export const meioOf = id => (MEIOS.find(m=>m.id===id)||{n:id}).n;
