@@ -1,4 +1,4 @@
-import { MEIOS, meioOf } from './config.js';
+import { MEIOS, CORES_CARTAO, meioOf } from './config.js';
 import { S, catOf, cartaoOf, cartoesAtivos } from './store.js';
 import { calc, recInMonth, faturaPeriodo, vencimentoData, infoCartao } from './finance.js';
 import { $, esc, fmt, todayISO, thisMonth, addM, diffM, mLabel, dLabel, sum, normTxt, diasEntre, addDias, valIn } from './util.js';
@@ -40,93 +40,130 @@ export const diasSemBackup = () => S.config.ultimoBackup ? diasEntre(S.config.ul
 function avisos(){
   let h = '';
   if(isIOS() && !instalado()) h += banner(`<b>Instale o app no iPhone:</b> toque em Compartilhar → <b>Adicionar à Tela de Início</b>. Aberto só no Safari, o iPhone pode apagar seus dados depois de 7 dias sem uso.`);
-  if(!S.config.configurado) h += banner(`Antes de tudo: confira sua renda e seus <b>cartões</b> (dia de fechamento e de vencimento). <a data-act="tab" data-t="ajustes">Ir para Ajustes →</a>`);
+  if(!S.config.configurado) h += banner(`Antes de tudo: confira sua renda e seus <b>cartões</b> (dia de fechamento e de vencimento). <a data-act="tab" data-t="ajustes">Ir para Ajustes</a>`);
   const d = diasSemBackup();
-  if(temDados() && (d===null || d>=15)) h += banner(`${d===null ? 'Você ainda não fez nenhum backup.' : `Seu último backup foi há ${d} dias.`} Seus dados existem só neste aparelho. <a data-act="export">Fazer backup agora →</a>`);
+  if(temDados() && (d===null || d>=15)) h += banner(`${d===null ? 'Você ainda não fez nenhum backup.' : `Seu último backup foi há ${d} dias.`} Seus dados existem só neste aparelho. <a data-act="export">Fazer backup agora</a>`);
   return h;
 }
 
 /* ---------- Início ---------- */
-const periodoTxt = k => { const p = faturaPeriodo(ui.mes, k); return `Compras de ${dLabel(p.ini)} a ${dLabel(p.fim)}`; };
-const linhaFatura = x => `<div class="row"><span class="l">${esc(x.cartao.nome)} <span class="tag">vence ${dLabel(vencimentoData(ui.mes, x.cartao))}</span><br><span class="mut sm">${periodoTxt(x.cartao).toLowerCase()}</span></span><b>${fmt(x.total)}</b></div>`;
+// valor com os centavos em destaque menor (como num extrato)
+export const valorHTML = v => { const s = fmt(v), i = s.lastIndexOf(','); return i<0 ? esc(s) : `${esc(s.slice(0,i))}<span class="cents">${esc(s.slice(i))}</span>`; };
+const inicial = s => esc((String(s).trim()[0] || '?').toUpperCase());
+const corCartao = k => 'cc-' + (CORES_CARTAO.includes(k.cor) ? k.cor : CORES_CARTAO[0]);
+const secH = (titulo, lado='', id='') => `<div class="sec-h"><h2${id?` id="${id}"`:''}>${titulo}</h2><span class="sm">${lado}</span></div>`;
+const ICON = {
+  gasto:'<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
+  entrada:'<svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg>',
+  csv:'<svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></svg>',
+  backup:'<svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>'
+};
 
-// situação de cada cartão hoje: o que vence, o que está aberto e o melhor dia de compra
-function vCartoesHoje(){
-  const hoje = todayISO();
-  const blocos = cartoesAtivos().map(k=>{
-    const i = infoCartao(k, hoje);
-    let h = `<div class="cartao"><div class="top"><b>${esc(k.nome)}</b><span class="tag">fecha dia ${k.fechamento} · vence dia ${k.vencimento}</span></div>`;
-    if(i.prox!==i.aberta) h += `<div class="row"><span class="l">Fatura fechada<br><span class="mut sm">vence ${dLabel(i.proxVence)} (${emDias(i.diasProx)})</span></span><b>${fmt(i.valorProx)}</b></div>`;
-    h += `<div class="row"><span class="l">Fatura aberta<br><span class="mut sm">fecha ${dLabel(i.fechaEm)} (${emDias(i.diasFecha)}) · vence ${dLabel(i.pagaHoje)} (${emDias(i.diasHoje)})</span></span><b>${fmt(i.valorAberta)}</b></div>`;
-    h += i.hojeEhMelhor
-      ? `<p class="note"><b class="pos">Hoje é o melhor dia de compra.</b> O que comprar hoje só vence em ${dLabel(i.pagaHoje)}: ${i.diasHoje} dias para pagar.</p>`
-      : `<p class="note">Comprando hoje, paga em ${dLabel(i.pagaHoje)} (${i.diasHoje} dias). <b>Melhor dia de compra: dia ${k.fechamento}</b>. Comprando em ${dLabel(i.melhorDia)}, paga só em ${dLabel(i.pagaMelhor)} (${i.diasMelhor} dias).</p>`;
-    return h + '</div>';
-  });
-  return `<div class="card" style="margin-bottom:12px"><h2>${blocos.length>1 ? 'Seus cartões hoje' : 'Seu cartão hoje'}</h2>${blocos.join('')}</div>`;
+// sobra do mês: número grande + barra mostrando para onde vai o que entra
+function vHero(c){
+  const receita = c.renda + c.entradas;
+  const partes = [
+    ['Cartões', c.fatura, 'var(--lav)'],
+    ['Fixos', c.fixosFora, 'var(--blue)'],
+    ['Pix e débito', c.avulsos, 'var(--amb)'],
+    ['Metas', Math.max(0, c.guardado), '#5fd4b4'],
+    ['Sobra', Math.max(0, c.sobra), 'var(--accent)']
+  ];
+  const base = Math.max(1, sum(partes, p=>p[1]));
+  const sub = receita ? `de ${fmt(receita)} que entram no mês` : 'Lance suas entradas no + ou defina sua renda em Ajustes';
+  return `<div class="card hero">
+    <div class="lbl">${c.sobra>=0 ? 'Sobra prevista' : 'Vai faltar'}</div>
+    <div class="big ${c.sobra>=0?'':'neg'}">${valorHTML(c.sobra)}</div>
+    <div class="sub">${sub}</div>
+    <div class="stack" aria-hidden="true">${partes.filter(p=>p[1]>0).map(p=>`<i style="flex:${p[1]/base};background:${p[2]}"></i>`).join('')}</div>
+    <div class="legend">
+      ${partes.slice(0,4).filter(p=>p[1]>0 || p[0]!=='Metas').map(p=>`<div><span><i class="dot" style="background:${p[2]}"></i>${p[0]}</span><b>${fmt(p[1])}</b></div>`).join('')}
+      ${c.guardado<0 ? `<div><span>Retirado de metas</span><b class="pos">+ ${fmt(-c.guardado)}</b></div>` : ''}
+    </div>
+  </div>
+  <div class="acts">
+    <button data-act="novo" data-v="gasto">${ICON.gasto}Gasto</button>
+    <button data-act="novo" data-v="entrada">${ICON.entrada}Entrada</button>
+    <button data-act="pickCsv">${ICON.csv}Fatura CSV</button>
+    <button data-act="export">${ICON.backup}Backup</button>
+  </div>`;
 }
 
-function vInicio(){
-  const c = calc(ui.mes), receita = c.renda + c.entradas;
-  const um = S.cartoes.length===1 ? S.cartoes[0] : null;
-  // na fatura do mês aparecem os cartões ativos e os removidos que ainda têm valor (parcelas em andamento)
-  const faturas = c.porCartao.filter(x=>!x.cartao.arquivado || x.total);
-  let h = avisos();
-  if(ui.mes===thisMonth()) h += vCartoesHoje();
-  h += `<div class="grid two">
-    <div class="card">
-      <h2>Sobra prevista no mês</h2>
-      <div class="big ${c.sobra>=0?'pos':'neg'}">${fmt(c.sobra)}</div>
-      <div style="margin-top:10px">
-        <div class="row"><span class="l">Renda fixa</span><b>${fmt(c.renda)}</b></div>
-        ${c.entradas || !c.renda ? `<div class="row"><span class="l">Entradas do mês</span><b class="pos">+ ${fmt(c.entradas)}</b></div>` : ''}
-        <div class="row"><span class="l">${um ? `Fatura do cartão <span class="tag">vence dia ${um.vencimento}</span>` : 'Faturas dos cartões'}</span><b class="neg">− ${fmt(c.fatura)}</b></div>
-        <div class="row"><span class="l">Fixos fora do cartão</span><b class="neg">− ${fmt(c.fixosFora)}</b></div>
-        <div class="row"><span class="l">Pix / débito / dinheiro</span><b class="neg">− ${fmt(c.avulsos)}</b></div>
-        ${c.guardado ? `<div class="row"><span class="l">${c.guardado>0?'Guardado em metas':'Retirado de metas'}</span><b class="${c.guardado>0?'neg':'pos'}">${c.guardado>0?'−':'+'} ${fmt(Math.abs(c.guardado))}</b></div>` : ''}
+// os cartões como cartões físicos: quanto pagar, quando vence e o melhor dia de compra
+function vCarteira(){
+  const hoje = todayISO(), ativos = cartoesAtivos();
+  const cols = ativos.map(k=>{
+    const i = infoCartao(k, hoje), fechada = i.prox!==i.aberta;
+    const topo = fechada
+      ? `<small>A pagar até ${dLabel(i.proxVence)}, ${emDias(i.diasProx)}</small><b>${valorHTML(i.valorProx)}</b>`
+      : `<small>Fatura atual, vence ${dLabel(i.pagaHoje)}</small><b>${valorHTML(i.valorAberta)}</b>`;
+    const rodape = fechada
+      ? `<div><span>Próxima fatura</span><br><b>${fmt(i.valorAberta)}</b></div><div style="text-align:right"><span>Fecha</span><br><b>${dLabel(i.fechaEm)}</b></div>`
+      : `<div><span>Fecha</span><br><b>${dLabel(i.fechaEm)}</b></div><div style="text-align:right"><span>Faltam</span><br><b>${i.diasFecha} dia${i.diasFecha===1?'':'s'}</b></div>`;
+    const dica = i.hojeEhMelhor
+      ? `<b class="hoje">Hoje é o melhor dia de compra.</b> O que comprar hoje só vence em ${dLabel(i.pagaHoje)}: ${i.diasHoje} dias para pagar.`
+      : `Comprando hoje, você paga em ${dLabel(i.pagaHoje)} (${i.diasHoje} dias). <b>Melhor dia de compra: ${dLabel(i.melhorDia)}</b>, que só vence em ${dLabel(i.pagaMelhor)} (${i.diasMelhor} dias).`;
+    return `<div class="cc-col">
+      <div class="ccard ${corCartao(k)}">
+        <div class="top"><span class="nome">${esc(k.nome)}</span><span class="dias">fecha dia ${k.fechamento}<br>vence dia ${k.vencimento}</span></div>
+        <div class="val">${topo}</div>
+        <div class="bottom">${rodape}</div>
       </div>
-    </div>
-    <div class="card">
-      <h2>${um ? 'Fatura que vence neste mês' : 'Faturas que vencem neste mês'}</h2>
-      <div class="big">${fmt(c.fatura)}</div>
-      <div style="margin-top:10px">
-        ${um ? '' : faturas.map(linhaFatura).join('')}
-        <div class="row"><span class="l">Parcelas e fixos no cartão</span><b>${fmt(c.faturaFixos)}</b></div>
-        <div class="row"><span class="l">Compras lançadas</span><b>${fmt(c.faturaCompras)}</b></div>
-        ${um ? `<div class="row"><span class="l mut sm">${periodoTxt(um)} caem nesta fatura</span></div>` : ''}
-      </div>
-      ${receita ? `<div class="bar" style="margin-top:8px"><i style="width:${Math.min(100,c.fatura/receita*100)}%;background:${c.fatura/receita>.8?'var(--red)':c.fatura/receita>.6?'var(--amb)':'var(--acc)'}"></i></div><p class="note">${Math.round(c.fatura/receita*100)}% da renda vai para o cartão</p>` : ''}
-    </div>
-  </div>`;
+      <p class="cc-dica">${dica}</p>
+    </div>`;
+  });
+  return secH(ativos.length>1 ? 'Seus cartões' : 'Seu cartão', ativos.length>1 ? 'deslize para ver os outros' : '')
+    + `<div class="carteira ${ativos.length>1?'':'um'}">${cols.join('')}</div>`;
+}
 
-  // histórico
+// faturas que vencem no mês escolhido, por cartão
+function vFaturasMes(c){
+  const faturas = c.porCartao.filter(x=>!x.cartao.arquivado || x.total);
+  const linhas = faturas.map(x=>{
+    const p = faturaPeriodo(ui.mes, x.cartao);
+    return `<div class="row"><div class="lanc"><span class="ico ${corCartao(x.cartao)}">${inicial(x.cartao.nome)}</span><div class="t"><div>${esc(x.cartao.nome)}</div><small>vence ${dLabel(vencimentoData(ui.mes, x.cartao))}, compras de ${dLabel(p.ini)} a ${dLabel(p.fim)}</small></div></div><b>${fmt(x.total)}</b></div>`;
+  }).join('');
+  const receita = c.renda + c.entradas, pct = receita ? Math.round(c.fatura/receita*100) : 0;
+  return secH(faturas.length>1 ? 'Faturas do mês' : 'Fatura do mês', fmt(c.fatura))
+    + `<div class="card">${linhas}
+      <p class="note">${c.faturaFixos ? `Inclui ${fmt(c.faturaFixos)} de parcelas e fixos no cartão. ` : ''}${receita ? `${pct}% do que entra no mês vai para o cartão.` : ''}</p></div>`;
+}
+
+function vHistorico(){
   const meses = [...Array(6)].map((_,i)=>addM(ui.mes, i-5));
   const vals = meses.map(k=>calc(k).saidas), mx = Math.max(1,...vals);
   const comDados = vals.filter(v=>v>0), media = comDados.length ? sum(comDados,x=>x)/comDados.length : 0;
-  h += `<div class="card" style="margin-top:12px"><h2>Saídas nos últimos 6 meses</h2>
-    <div class="proj">${meses.map((k,i)=>`<div class="${k===ui.mes?'atual':''}"><b>${Math.round(vals[i])}</b><i style="height:${vals[i]/mx*85}%"></i>${mLabel(k,true)}</div>`).join('')}</div>
-    <p class="note">Fatura + fixos fora do cartão + pix/débito/dinheiro.${media ? ` Média: ${fmt(media)} por mês.` : ''}</p></div>`;
+  const curto = v => v>=10000 ? (v/1000).toLocaleString('pt-BR',{maximumFractionDigits:1})+' mil' : Math.round(v).toLocaleString('pt-BR');
+  return secH('Últimos 6 meses', media ? `média de ${fmt(media)}` : '')
+    + `<div class="card"><div class="pills">${meses.map((k,i)=>`<div class="${k===ui.mes?'atual':''}"><span class="v">${curto(vals[i])}</span><i style="height:${Math.max(6, vals[i]/mx*100)}%"></i><span class="m">${mLabel(k,true)}</span></div>`).join('')}</div>
+      <p class="note">Tudo o que saiu: faturas, fixos fora do cartão e pix, débito e dinheiro.</p></div>`;
+}
 
-  // categorias, com comparação com o mês anterior
+function vCategorias(c){
   const ant = addM(ui.mes,-1), prev = calc(ant).porCat, antLbl = mLabel(ant,true);
   const cats = Object.entries(c.porCat).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);
   const maxV = Math.max(1, ...cats.map(x=>x[1]), ...Object.values(S.limites).map(Number));
-  h += `<div class="card" style="margin-top:12px"><h2>Para onde foi o dinheiro (${esc(mLabel(ui.mes,true))})</h2>`;
+  let h = secH('Para onde foi', mLabel(ui.mes)) + `<div class="card">`;
   if(!cats.length) h += `<div class="empty">Nenhum gasto neste mês ainda.</div>`;
   cats.forEach(([id,v])=>{
     const ct = catOf(id), lim = Number(S.limites[id])||0, p0 = prev[id]||0;
     let cor = ct.c, extra = '', delta = '';
-    if(lim){ const p=v/lim; cor = p>1?'var(--red)':p>.8?'var(--amb)':ct.c; extra = ` <span class="mut sm">de ${fmt(lim)}</span>${p>1?' <span class="neg sm">• estourou</span>':p>.8?' <span class="amb sm">• perto do limite</span>':''}`; }
-    if(p0>0){ const pct = Math.round((v-p0)/p0*100); if(pct) delta = ` <span class="${pct>0?'neg':'pos'} sm" style="white-space:nowrap">${pct>0?'▲':'▼'} ${Math.abs(pct)}% vs ${antLbl}</span>`; }
+    if(lim){ const p=v/lim; cor = p>1?'var(--neg)':p>.8?'var(--amb)':ct.c; extra = `<div class="sm mut" style="text-align:right">de ${fmt(lim)}${p>1?' <span class="neg">estourou</span>':p>.8?' <span class="amb">perto do limite</span>':''}</div>`; }
+    if(p0>0){ const pct = Math.round((v-p0)/p0*100); if(pct) delta = `<span class="delta ${pct>0?'neg':'pos'}">${pct>0?'▲':'▼'} ${Math.abs(pct)}% vs ${antLbl}</span>`; }
     const w = lim ? Math.min(100, v/lim*100) : v/maxV*100;
     h += `<div class="cat"><div class="top"><span>${dot(ct.c)}${esc(ct.n)}${delta}</span><span><b>${fmt(v)}</b>${extra}</span></div><div class="bar"><i style="width:${w}%;background:${cor}"></i></div></div>`;
   });
-  h += `</div>`;
+  return h + `</div>`;
+}
 
-  // lançamentos + busca
+function vInicio(){
+  const c = calc(ui.mes);
+  let h = avisos() + vHero(c);
+  if(ui.mes===thisMonth()) h += vCarteira();
+  h += vFaturasMes(c) + vHistorico() + vCategorias(c);
   const meiosF = MEIOS.filter(m=>m.id!=='boleto');
-  h += `<div class="card" style="margin-top:12px"><h2 id="listaTit"></h2>
-    <input data-filtro="q" type="search" placeholder="Buscar em todos os meses…" value="${esc(ui.busca.q)}" autocomplete="off" aria-label="Buscar lançamentos">
+  h += secH('', '', 'listaTit') + `<div class="card">
+    <input data-filtro="q" type="search" placeholder="Buscar em todos os meses" value="${esc(ui.busca.q)}" autocomplete="off" aria-label="Buscar lançamentos">
     <div class="two-in" style="margin-top:8px">
       <select data-filtro="cat" aria-label="Filtrar por categoria"><option value="">Todas as categorias</option>${S.cats.map(c=>`<option value="${esc(c.id)}" ${ui.busca.cat===c.id?'selected':''}>${esc(c.n)}</option>`).join('')}</select>
       <select data-filtro="meio" aria-label="Filtrar por meio de pagamento"><option value="">Todos os meios</option>${meiosF.map(m=>`<option value="${m.id}" ${ui.busca.meio===m.id?'selected':''}>${m.n}</option>`).join('')}<option value="entrada" ${ui.busca.meio==='entrada'?'selected':''}>Só entradas</option></select>
@@ -153,14 +190,18 @@ export function renderLista(){
   let h = '';
   if(filtrando && itens.length){
     const g = sum(itens.filter(i=>i.k==='gasto'), i=>i.x.valor), e = sum(itens.filter(i=>i.k==='entrada'), i=>i.x.valor);
-    h += `<p class="note" style="margin:0 0 4px">${[g?`Gastos: <b>${fmt(g)}</b>`:'', e?`Entradas: <b>${fmt(e)}</b>`:''].filter(Boolean).join(' · ')}</p>`;
+    h += `<p class="note" style="margin:0 0 4px">${[g?`Gastos: <b>${fmt(g)}</b>`:'', e?`Entradas: <b>${fmt(e)}</b>`:''].filter(Boolean).join(', ')}</p>`;
   }
-  if(!itens.length) h += `<div class="empty">${filtrando ? 'Nada encontrado.' : 'Toque no <b>+</b> para lançar um gasto ou uma entrada.'}</div>`;
+  if(!itens.length) h += `<div class="empty">${filtrando ? 'Nada encontrado.' : 'Toque no + para lançar um gasto ou uma entrada.'}</div>`;
   itens.slice(0, MAX_LISTA).forEach(({k,x})=>{
     const data = filtrando ? dLabel(x.data)+'/'+x.data.slice(2,4) : dLabel(x.data);
-    const btns = `<button class="x" data-act="editL" data-k="${k}" data-id="${esc(x.id)}" aria-label="Editar">✎</button><button class="x" data-act="delL" data-k="${k}" data-id="${esc(x.id)}" aria-label="Apagar">×</button>`;
-    if(k==='gasto'){ const ct = catOf(x.cat); h += `<div class="row"><span class="l">${dot(ct.c)}${esc(x.desc||ct.n)} <span class="mut sm">· ${data} · ${esc(meioLabel(x))}</span></span><span style="white-space:nowrap"><b>${fmt(x.valor)}</b>${btns}</span></div>`; }
-    else h += `<div class="row"><span class="l">${dot('var(--acc)')}${esc(x.desc||'Entrada')} <span class="mut sm">· ${data} · entrada</span></span><span style="white-space:nowrap"><b class="pos">+ ${fmt(x.valor)}</b>${btns}</span></div>`;
+    const btns = `<button class="x" data-act="editL" data-k="${k}" data-id="${esc(x.id)}" aria-label="Editar">✎&#xFE0E;</button><button class="x" data-act="delL" data-k="${k}" data-id="${esc(x.id)}" aria-label="Apagar">×</button>`;
+    if(k==='gasto'){
+      const ct = catOf(x.cat);
+      h += `<div class="row"><div class="lanc"><span class="ico" style="background:${ct.c}">${inicial(ct.n)}</span><div class="t"><div>${esc(x.desc||ct.n)}</div><small>${data}, ${esc(meioLabel(x))}</small></div></div><span style="white-space:nowrap"><b>${fmt(x.valor)}</b>${btns}</span></div>`;
+    } else {
+      h += `<div class="row"><div class="lanc"><span class="ico" style="background:var(--accent);color:var(--on-accent)">+</span><div class="t"><div>${esc(x.desc||'Entrada')}</div><small>${data}, entrada</small></div></div><span style="white-space:nowrap"><b class="pos">+ ${fmt(x.valor)}</b>${btns}</span></div>`;
+    }
   });
   if(itens.length > MAX_LISTA) h += `<p class="note">Mostrando ${MAX_LISTA} de ${itens.length}. Refine a busca.</p>`;
   el.innerHTML = h;
@@ -200,8 +241,9 @@ function vLancar(){
   const ativos = cartoesAtivos();
   if(!S.cartoes.some(k=>k.id===d.cartao) || (!ed && !ativos.some(k=>k.id===d.cartao))) d.cartao = ultimoCartao() || ativos[0].id;
   let h = `<div class="card">`;
-  if(!ed) h += `<div class="chips" style="margin-bottom:14px"><button class="chip ${tipo==='gasto'?'on':''}" aria-pressed="${tipo==='gasto'}" data-act="dTipo" data-v="gasto">Gasto</button><button class="chip ${tipo==='entrada'?'on':''}" aria-pressed="${tipo==='entrada'}" data-act="dTipo" data-v="entrada">Entrada</button></div>`;
-  h += `<h2>${ed ? (tipo==='gasto'?'Editar gasto':'Editar entrada') : (tipo==='gasto'?'Novo gasto':'Nova entrada')}</h2>
+  if(!ed) h += `<div class="seg"><button class="chip ${tipo==='gasto'?'on':''}" aria-pressed="${tipo==='gasto'}" data-act="dTipo" data-v="gasto">Gasto</button><button class="chip ${tipo==='entrada'?'on':''}" aria-pressed="${tipo==='entrada'}" data-act="dTipo" data-v="entrada">Entrada</button></div>`;
+  if(ed) h += `<h2>${tipo==='gasto'?'Editar gasto':'Editar entrada'}</h2>`;
+  h += `
     <input id="gValor" class="valor" inputmode="decimal" placeholder="R$ 0,00" autocomplete="off" aria-label="Valor" value="${ed ? valIn(ed.valor) : ''}">`;
   if(tipo==='gasto'){
     h += `<label>Categoria</label><div class="chips">${cats.map(c=>chip(d.cat===c.id, 'dCat', c.id, esc(c.n))).join('')}</div>
@@ -253,7 +295,7 @@ function vFixos(){
     }
     const x = encerrado(r) ? `<button class="x" data-act="delR" data-id="${esc(r.id)}" aria-label="Apagar de vez">×</button>`
                            : `<button class="x" data-act="endR" data-id="${esc(r.id)}" aria-label="Encerrar">×</button>`;
-    return `<div class="row"><span class="l">${dot(ct.c)}${esc(r.nome)}<br><span class="mut sm">${sub}</span></span><span style="white-space:nowrap"><b>${fmt(r.valor)}</b><button class="x" data-act="editR" data-id="${esc(r.id)}" aria-label="Editar">✎</button>${x}</span></div>`;
+    return `<div class="row"><span class="l">${dot(ct.c)}${esc(r.nome)}<br><span class="mut sm">${sub}</span></span><span style="white-space:nowrap"><b>${fmt(r.valor)}</b><button class="x" data-act="editR" data-id="${esc(r.id)}" aria-label="Editar">✎&#xFE0E;</button>${x}</span></div>`;
   };
   // projeção 6 meses
   const meses = [...Array(6)].map((_,i)=>addM(hoje,i));
@@ -320,7 +362,7 @@ function vCartoesAjustes(){
   const ativos = cartoesAtivos(), removidos = S.cartoes.filter(k=>k.arquivado);
   return `<div class="card" style="margin-top:12px"><h2>Cartões</h2>
     <p class="note" style="margin:0 0 4px">Os dias de fechamento e vencimento estão no app do banco, na tela da fatura. Eles decidem em qual fatura cada compra cai e qual é o melhor dia de compra.</p>
-    ${ativos.map(k=>`<div class="cartao-ed"><div class="row catrow"><input data-kn="${esc(k.id)}" value="${esc(k.nome)}" maxlength="40" aria-label="Nome do cartão">${ativos.length>1 ? `<button class="x" data-act="delCartao" data-id="${esc(k.id)}" aria-label="Remover cartão ${esc(k.nome)}">×</button>` : ''}</div>${diasCartao(`data-kf="${esc(k.id)}"`, `data-kv="${esc(k.id)}"`, k)}</div>`).join('')}
+    ${ativos.map(k=>`<div class="cartao-ed"><div class="row catrow"><input data-kn="${esc(k.id)}" value="${esc(k.nome)}" maxlength="40" aria-label="Nome do cartão">${ativos.length>1 ? `<button class="x" data-act="delCartao" data-id="${esc(k.id)}" aria-label="Remover cartão ${esc(k.nome)}">×</button>` : ''}</div>${diasCartao(`data-kf="${esc(k.id)}"`, `data-kv="${esc(k.id)}"`, k)}<div class="cores" role="group" aria-label="Cor do cartão ${esc(k.nome)}">${CORES_CARTAO.map(c=>`<button class="cc-${c} ${k.cor===c?'on':''}" aria-pressed="${k.cor===c}" data-act="corCartao" data-id="${esc(k.id)}" data-v="${c}" aria-label="${c}"></button>`).join('')}</div></div>`).join('')}
     <button class="btn" data-act="saveCartoes">Salvar cartões</button>
     <div class="cartao-ed" style="margin-top:16px"><label for="nKn">Adicionar cartão</label><input id="nKn" maxlength="40" placeholder="ex: Nubank, Inter, Itaú…">${diasCartao('id="nKf"', 'id="nKv"', null)}</div>
     <button class="btn sec" data-act="addCartao">Adicionar cartão</button>

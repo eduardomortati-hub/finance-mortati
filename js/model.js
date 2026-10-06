@@ -1,12 +1,12 @@
 // Formato dos dados, migração de versões antigas e validação de backups.
-import { CATS, MEIOS } from './config.js';
+import { CATS, MEIOS, CORES_CARTAO } from './config.js';
 import { round2 } from './util.js';
 
 export const VERSAO_DADOS = 3;
 // v2: categorias editáveis (cats), entradas, fim/reajuste de fixos, movimentos das metas, data do último backup
 // v3: vários cartões (cartoes), cada um com fechamento e vencimento; gastos e fixos no cartão apontam para um deles
 
-const cartaoPadrao = (fechamento=1, vencimento=10) => ({id:'cartao1', nome:'Meu cartão', fechamento, vencimento});
+const cartaoPadrao = (fechamento=1, vencimento=10) => ({id:'cartao1', nome:'Meu cartão', fechamento, vencimento, cor:CORES_CARTAO[0]});
 
 export function empty(){
   return {v:VERSAO_DADOS, config:{renda:0, configurado:false, ultimoBackup:null}, cartoes:[cartaoPadrao()],
@@ -33,8 +33,9 @@ export function normalize(d){
 
   // até a v2 havia um cartão só, com fechamento e vencimento em config
   const cartoes = Array.isArray(d.cartoes)
-    ? keep(d.cartoes, x=>ID.test(x.id) && typeof x.nome==='string' && x.nome.trim()).map(x=>{
-        const k = {id:x.id, nome:str(x.nome,40), fechamento:int(x.fechamento,1,1,31), vencimento:int(x.vencimento,10,1,31)};
+    ? keep(d.cartoes, x=>ID.test(x.id) && typeof x.nome==='string' && x.nome.trim()).map((x,i)=>{
+        const k = {id:x.id, nome:str(x.nome,40), fechamento:int(x.fechamento,1,1,31), vencimento:int(x.vencimento,10,1,31),
+          cor: CORES_CARTAO.includes(x.cor) ? x.cor : CORES_CARTAO[i % CORES_CARTAO.length]};
         if(x.arquivado) k.arquivado = true; return k; })
     : [cartaoPadrao(int(c.fechamento,1,1,31), int(c.vencimento,10,1,31))];
   if(!cartoes.length) cartoes.push(cartaoPadrao());

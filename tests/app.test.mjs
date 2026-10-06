@@ -82,7 +82,7 @@ test('migra dados da versão 1 e guarda uma cópia do original', async()=>{
   const {page, ctx, errors} = await abrir(v1);
   const s = await lerEstado(page);
   assert.equal(s.v, 3);
-  assert.deepEqual(s.cartoes, [{id:'cartao1', nome:'Meu cartão', fechamento:3, vencimento:10}], 'cartão vem do config antigo');
+  assert.deepEqual(s.cartoes, [{id:'cartao1', nome:'Meu cartão', fechamento:3, vencimento:10, cor:'brasa'}], 'cartão vem do config antigo');
   assert.equal(s.config.fechamento, undefined);
   assert.equal(s.gastos[0].cartao, undefined, 'pix não tem cartão');
   assert.equal(s.gastos[1].cartao, 'cartao1');
@@ -242,7 +242,7 @@ test('histórico de 6 meses e comparação com o mês anterior', async()=>{
   const {page, ctx} = await abrir(estado({gastos:[
     {id:'a', data:ym(-1)+'-10', valor:100, cat:'mercado', meio:'pix', desc:'', criado:1},
     {id:'b', data:iso(0), valor:150, cat:'mercado', meio:'pix', desc:'', criado:2}]}));
-  assert.equal(await page.$$eval('.proj div', d=>d.length), 6);
+  assert.equal(await page.$$eval('.pills > div', d=>d.length), 6);
   assert.match(await page.textContent('#view'), /▲ 50% vs/);
   await ctx.close();
 });
@@ -379,7 +379,7 @@ test('privacidade: nenhuma requisição para fora e a CSP bloqueia conexões', a
 test('PWA: todos os arquivos no cache, abre offline e oferece atualização', async()=>{
   const sw = fs.readFileSync(path.join(ROOT,'sw.js'),'utf8');
   const listados = [...sw.match(/const FILES = \[([\s\S]*?)\];/)[1].matchAll(/'([^']+)'/g)].map(m=>m[1]);
-  for(const dir of ['js','css','icons']) for(const f of fs.readdirSync(path.join(ROOT,dir)))
+  for(const dir of ['js','css','icons','fonts']) for(const f of fs.readdirSync(path.join(ROOT,dir)).filter(f=>!f.endsWith('.txt')))
     assert.ok(listados.includes(`./${dir}/${f}`), `${dir}/${f} falta em FILES do sw.js`);
 
   const {page, ctx} = await abrir(estado({gastos:[{id:'g1', data:iso(0), valor:5, cat:'mercado', meio:'pix', desc:'', criado:1}]}), {sw:true});
@@ -426,7 +426,7 @@ test('cartão hoje: próximo vencimento, fatura aberta e melhor dia de compra', 
   assert.equal(r[3].fechaEm, '2026-10-25');
   // e a tela mostra isso
   const txt = await page.textContent('#view');
-  assert.match(txt, /Seu cartão hoje/);
+  assert.match(txt, /Seu cartão/);
   assert.match(txt, /Melhor dia de compra|melhor dia de compra/);
   await ctx.close();
 });
@@ -451,7 +451,7 @@ test('vários cartões: cada compra cai na fatura do seu cartão', async()=>{
   const por = await page.evaluate(async k=>{ const {calc} = await import('./js/finance.js'); return calc(k).porCartao.map(x=>[x.cartao.id, x.total]); }, ym(1));
   assert.deepEqual(Object.fromEntries(por), {k1:40, k2:200}, 'Nubank: compra dia 10 depois do fechamento (5) vence em 12 do mês seguinte');
   await aba(page,'inicio');
-  assert.match(await page.textContent('#view'), /Seus cartões hoje/);
+  assert.match(await page.textContent('#view'), /Seus cartões/);
   assert.match(await page.textContent('#lista'), /Inter/);
   await ctx.close();
 });
@@ -490,5 +490,17 @@ test('CSV com mais de um cartão pergunta de qual cartão é a fatura', async()=
   await page.click('[data-dlg="k2"]');
   await page.waitForFunction(()=>JSON.parse(localStorage.getItem('meucaixa.v1')).gastos.length===1);
   assert.equal((await lerEstado(page)).gastos[0].cartao, 'k2');
+  await ctx.close();
+});
+
+test('cor do cartão: escolher em Ajustes muda o cartão no Início', async()=>{
+  const {page, ctx, errors} = await abrir(estado());
+  await aba(page,'ajustes');
+  await page.click('[data-act="corCartao"][data-id="k1"][data-v="oceano"]');
+  assert.equal((await lerEstado(page)).cartoes[0].cor, 'oceano');
+  await aba(page,'inicio');
+  assert.ok(await page.$('.ccard.cc-oceano'));
+  assert.equal(await page.evaluate(()=>getComputedStyle(document.body).fontFamily.includes('Hanken')), true, 'fonte do app carregada');
+  assert.deepEqual(errors, []);
   await ctx.close();
 });

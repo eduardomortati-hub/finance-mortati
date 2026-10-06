@@ -4,6 +4,7 @@ import { faturaMonth } from './finance.js';
 import { ui, render } from './views.js';
 import { ask } from './modal.js';
 import { cifrar } from './crypto.js';
+import { CORES_CARTAO } from './config.js';
 import { $, uid, fmt, round2, parseNum, todayISO, thisMonth, addM, diffM, mLabel, valIn, toast } from './util.js';
 
 function download(texto, nome){
@@ -41,6 +42,7 @@ export const A = {
   tab(d){ ui.tab=d.t; ui.editId=null; ui.editG=null; render(); },
   mes(d){ ui.mes=addM(ui.mes, Number(d.d)); render(); },
   dTipo(d){ ui.draft.tipo=d.v; keepDraft(); },
+  novo(d){ ui.draft.tipo=d.v; ui.editG=null; ui.tab='lancar'; render(); },
   dCat(d){ ui.draft.cat=d.id; keepDraft(); },
   dMeio(d){ ui.draft.meio=d.id; if(d.id!=='cartao') ui.draft.parcelado=false; keepDraft(); },
   dParc(d){ ui.draft.parcelado = d.v==='1'; keepDraft(); },
@@ -207,8 +209,14 @@ export const A = {
     if(!nome) return toast('Digite o nome do cartão');
     if(!F || !V) return toast('Informe os dias de fechamento e vencimento (de 1 a 31)');
     const erro = lerCartoes(); if(erro) return toast(erro);
-    S.cartoes.push({id:'k'+uid(), nome, fechamento:F, vencimento:V});
+    const usadas = S.cartoes.map(k=>k.cor), cor = CORES_CARTAO.find(c=>!usadas.includes(c)) || CORES_CARTAO[S.cartoes.length % CORES_CARTAO.length];
+    S.cartoes.push({id:'k'+uid(), nome, fechamento:F, vencimento:V, cor});
     S.config.configurado = true; save(); toast('Cartão adicionado ✓'); render();
+  },
+  corCartao(d){
+    const k = S.cartoes.find(x=>x.id===d.id); if(!k || !CORES_CARTAO.includes(d.v)) return;
+    const erro = lerCartoes(); if(erro) return toast(erro);
+    k.cor = d.v; save(); render();
   },
   // remover: com lançamentos, o cartão só sai das opções e continua nas faturas passadas e nas parcelas em andamento
   delCartao(d){

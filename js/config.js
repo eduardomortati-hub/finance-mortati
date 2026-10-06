@@ -28,4 +28,7 @@ export const RULES = [
   [/MERCADOLIVRE|MERCADO LIVRE|SHOPEE|AMAZON|MAGAZINE|SHEIN|ALIEXPRESS|AMERICANAS/i,'compras']
 ];
 
+// degradês disponíveis para os cartões (classes .cc-* no CSS)
+export const CORES_CARTAO = ['brasa','lilas','lima','oceano','grafite'];
+
 export const meioOf = id => (MEIOS.find(m=>m.id===id)||{n:id}).n;

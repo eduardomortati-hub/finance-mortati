@@ -26,3 +26,8 @@ npm test        # testes de ponta a ponta no Edge (BROWSER=chrome para usar o Ch
 - `js/import.js` — importação de backup e CSV · `js/crypto.js` — backup com senha
 - `sw.js` — cache offline. `VERSION` é um hash dos arquivos gerado por `tools/stamp-sw.mjs`, que roda sozinho no pre-commit. **Arquivo novo precisa entrar em `FILES`** (o teste avisa se faltar).
 - `tools/make-icons.mjs` — gera os ícones (`npm run icons`)
+
+## Design
+Modo escuro (preto, grafite, limão e lilás) e modo claro (papel esverdeado, tinta verde-escura, blocos chapados), conforme o tema do aparelho. Os tokens de cor, raio e fonte ficam no topo de `css/style.css`. Os cartões de crédito usam os degradês `.cc-*` (escolhidos em Ajustes).
+
+Fontes servidas pelo próprio app, sem carregar nada de fora: Hanken Grotesk (interface) e Instrument Serif (números grandes no modo claro), ambas sob a SIL Open Font License — licenças em `fonts/`.
