@@ -1,11 +1,11 @@
-import { MEIOS, CORES_CARTAO, meioOf } from './config.js';
-import { S, catOf, cartaoOf, cartoesAtivos } from './store.js';
+import { CATS, MEIOS, CORES_CARTAO, meioOf } from './config.js';
+import { S, catOf, catsAtivas, cartaoOf, cartoesAtivos } from './store.js';
 import { calc, recInMonth, faturaPeriodo, vencimentoData, infoCartao } from './finance.js';
-import { $, esc, fmt, todayISO, thisMonth, addM, diffM, mLabel, dLabel, sum, normTxt, diasEntre, addDias, valIn } from './util.js';
+import { $, esc, fmt, todayISO, thisMonth, addM, diffM, mLabel, dLabel, sum, normTxt, diasEntre, addDias, valIn, parseNum } from './util.js';
 
 // estado da interface (não é salvo)
 export const ui = {tab:'inicio', mes:thisMonth(), draft:{tipo:'gasto', cat:null, meio:'cartao', parcelado:false},
-  editId:null, editG:null, busca:{q:'', cat:'', meio:''}, buscaAberta:false,
+  editId:null, editG:null, cartaoEd:null, cartaoCor:null, busca:{q:'', cat:'', meio:''}, buscaAberta:false,
   abertos:new Set()};   // seções recolhíveis que a pessoa abriu (data-fold)
 
 const ymBR = k => mLabel(k,true)+'/'+k.slice(2,4);
@@ -20,6 +20,7 @@ export const meioLabel = x => x.meio==='cartao' && S.cartoes.length>1 ? cartaoOf
 
 let lastTab = null;
 export function render(){
+  if(ui.tab!=='ajustes') ui.cartaoEd = null;   // sair de Ajustes descarta a edição de cartão pela metade
   document.querySelectorAll('nav button').forEach(b=>{
     const on = b.dataset.t===ui.tab;
     b.classList.toggle('on', on);
@@ -158,7 +159,7 @@ function vInicio(){
   if(buscando) h += `<div class="busca">
     <input data-filtro="q" type="search" placeholder="Buscar em todos os meses" value="${esc(q)}" autocomplete="off" aria-label="Buscar lançamentos">
     <div class="two-in" style="margin-top:8px">
-      <select data-filtro="cat" aria-label="Filtrar por categoria"><option value="">Todas as categorias</option>${S.cats.map(c=>`<option value="${esc(c.id)}" ${cat===c.id?'selected':''}>${esc(c.n)}</option>`).join('')}</select>
+      <select data-filtro="cat" aria-label="Filtrar por categoria"><option value="">Todas as categorias</option>${S.cats.filter(c=>!c.oculta || c.id===cat).map(c=>`<option value="${esc(c.id)}" ${cat===c.id?'selected':''}>${esc(c.n)}</option>`).join('')}</select>
       <select data-filtro="meio" aria-label="Filtrar por meio de pagamento"><option value="">Todos os meios</option>${meiosF.map(m=>`<option value="${m.id}" ${meio===m.id?'selected':''}>${m.n}</option>`).join('')}<option value="entrada" ${meio==='entrada'?'selected':''}>Só entradas</option></select>
     </div></div>`;
   h += `<div class="card" style="padding-top:6px;padding-bottom:6px"><div id="lista"></div></div>`;
@@ -205,7 +206,7 @@ export function renderLista(){
 function catsOrdenadas(){
   const desde = addDias(todayISO(), -90), cont = {};
   S.gastos.forEach(g=>{ if(g.data >= desde) cont[g.cat] = (cont[g.cat]||0) + 1; });
-  return S.cats.map((c,i)=>({c, i, n:cont[c.id]||0})).sort((a,b)=>b.n-a.n || a.i-b.i).map(x=>x.c);
+  return S.cats.filter(c=>!c.oculta || c.id===ui.draft.cat).map((c,i)=>({c, i, n:cont[c.id]||0})).sort((a,b)=>b.n-a.n || a.i-b.i).map(x=>x.c);
 }
 // cartão do gasto mais recente feito no cartão (para já vir selecionado)
 function ultimoCartao(){
@@ -230,14 +231,17 @@ function vLancar(){
   if(ui.editG && !ed) ui.editG = null;
   const tipo = ed ? ui.editG.k : d.tipo;
   const cats = catsOrdenadas();
-  if(!S.cats.some(c=>c.id===d.cat)) d.cat = cats[0].id;
+  if(!cats.some(c=>c.id===d.cat)) d.cat = cats[0].id;
   const ativos = cartoesAtivos();
   if(!S.cartoes.some(k=>k.id===d.cartao) || (!ed && !ativos.some(k=>k.id===d.cartao))) d.cartao = ultimoCartao() || ativos[0].id;
   let h = `<div class="card">`;
   if(!ed) h += `<div class="seg"><button class="chip ${tipo==='gasto'?'on':''}" aria-pressed="${tipo==='gasto'}" data-act="dTipo" data-v="gasto">Gasto</button><button class="chip ${tipo==='entrada'?'on':''}" aria-pressed="${tipo==='entrada'}" data-act="dTipo" data-v="entrada">Entrada</button></div>`;
   if(ed) h += `<h2>${tipo==='gasto'?'Editar gasto':'Editar entrada'}</h2>`;
-  h += `
-    <input id="gValor" class="valor" inputmode="decimal" placeholder="R$ 0,00" autocomplete="off" aria-label="Valor" value="${ed ? valIn(ed.valor) : ''}">`;
+  const parc = !ed && tipo==='gasto' && d.meio==='cartao' && d.parcelado;
+  h += `${parc ? '<div class="valor-lbl">Valor de cada parcela</div>' : ''}
+    <input id="gValor" class="valor" inputmode="decimal" placeholder="R$ 0,00" autocomplete="off" aria-label="${parc ? 'Valor de cada parcela' : 'Valor'}" value="${ed ? valIn(ed.valor) : ''}">
+    <label for="gDesc">${tipo==='gasto' ? 'O que comprou?' : 'De onde veio?'}</label>
+    <input id="gDesc" maxlength="80" value="${esc(ed?.desc||'')}" placeholder="${tipo==='gasto' ? 'ex: tênis, pizza, presente da mãe' : 'ex: salário, cliente X, freela'}" autocomplete="off">`;
   if(tipo==='gasto'){
     h += `<label>Categoria</label><div class="chips">${cats.map(c=>chip(d.cat===c.id, 'dCat', c.id, esc(c.n))).join('')}</div>
       <label>Pagou com</label><div class="chips">${MEIOS.filter(m=>m.id!=='boleto').map(m=>chip(d.meio===m.id, 'dMeio', m.id, m.n)).join('')}</div>`;
@@ -247,13 +251,10 @@ function vLancar(){
     }
     if(!ed && d.meio==='cartao'){
       h += `<label>Parcelado?</label><div class="chips"><button class="chip ${!d.parcelado?'on':''}" aria-pressed="${!d.parcelado}" data-act="dParc" data-v="0">À vista</button><button class="chip ${d.parcelado?'on':''}" aria-pressed="${d.parcelado}" data-act="dParc" data-v="1">Parcelado</button></div>`;
-      if(d.parcelado) h += `<label for="gParc">Número de parcelas (o valor acima é o total)</label><input id="gParc" inputmode="numeric" placeholder="ex: 6">`;
+      if(d.parcelado) h += `<label for="gParc">Em quantas vezes?</label><input id="gParc" inputmode="numeric" placeholder="ex: 6"><p class="note" id="gTotal">Digite o valor de cada parcela e quantas vezes.</p>`;
     }
   }
-  h += `<div class="two-in">
-      <div><label for="gData">Data</label><input id="gData" type="date" value="${ed ? ed.data : todayISO()}"></div>
-      <div><label for="gDesc">Descrição (opcional)</label><input id="gDesc" value="${esc(ed?.desc||'')}" placeholder="${tipo==='gasto'?'ex: pizza sexta':'ex: cliente X, freela'}"></div>
-    </div>
+  h += `<label for="gData">${parc ? 'Data da compra' : 'Data'}</label><input id="gData" type="date" value="${ed ? ed.data : todayISO()}">
     <button class="btn" data-act="saveG">${ed ? 'Salvar alterações' : tipo==='gasto' ? 'Salvar gasto' : 'Salvar entrada'}</button>
     ${ed ? '<button class="btn sec" data-act="cancelG">Cancelar edição</button>' : ''}
   </div>`;
@@ -262,6 +263,13 @@ function vLancar(){
     if(rec.length) h += `<div class="card" style="margin-top:12px"><h2>Repetir um gasto recente</h2><div class="chips">${rec.map(g=>`<button class="chip" data-act="repG" data-id="${esc(g.id)}">↺ ${esc(g.desc||catOf(g.cat).n)} · ${fmt(g.valor)}</button>`).join('')}</div></div>`;
   }
   return h;
+}
+
+// total do parcelado, atualizado enquanto digita
+export function totalParcelado(){
+  const el = $('#gTotal'); if(!el) return;
+  const v = parseNum($('#gValor').value), n = parseInt($('#gParc').value, 10);
+  el.innerHTML = v>0 && n>=2 ? `${n}x de ${esc(fmt(v))} = <b>${esc(fmt(v*n))}</b> no total` : 'Digite o valor de cada parcela e quantas vezes.';
 }
 
 /* ---------- Fixos ---------- */
@@ -314,7 +322,7 @@ function vFixos(){
       <div><label for="rIni">1ª fatura / 1º pagamento</label><input id="rIni" type="month" value="${e?.inicio||hoje}"></div>
       <div><label for="rMeio">Pago com</label><select id="rMeio">${MEIOS.map(m=>`<option value="${m.id}" ${(e?.meio||'cartao')===m.id?'selected':''}>${m.n}</option>`).join('')}</select></div>
       ${S.cartoes.length>1 ? `<div><label for="rCartao">Cartão (se pago no cartão)</label><select id="rCartao">${S.cartoes.filter(k=>!k.arquivado || k.id===e?.cartao).map(k=>`<option value="${esc(k.id)}" ${e?.cartao===k.id?'selected':''}>${esc(k.nome)}</option>`).join('')}</select></div>` : ''}
-      <div><label for="rCat">Categoria</label><select id="rCat">${S.cats.map(c=>`<option value="${esc(c.id)}" ${(e?.cat||'outros')===c.id?'selected':''}>${esc(c.n)}</option>`).join('')}</select></div>
+      <div><label for="rCat">Categoria</label><select id="rCat">${S.cats.filter(c=>!c.oculta || c.id===e?.cat).map(c=>`<option value="${esc(c.id)}" ${(e?.cat||'outros')===c.id?'selected':''}>${esc(c.n)}</option>`).join('')}</select></div>
       <div><label for="rFim">Último mês (opcional)</label><input id="rFim" type="month" value="${e?.fim||''}"></div>
       ${e && e.tipo==='fixo' ? `<div><label for="rVig">Se mudou o valor, vale a partir de</label><input id="rVig" type="month" value="${hoje}"></div>` : ''}
     </div>
@@ -343,23 +351,40 @@ function vMetas(){
     <button class="btn" data-act="saveM">Criar meta</button>`, !metas.length);
   h += fold('lim', 'Limite por categoria', `${Object.keys(S.limites).length || 'nenhum'} por mês`, `
     <p class="note" style="margin:0 0 6px">Deixe vazio para não ter limite. No Início a barra fica amarela perto do limite e vermelha quando estoura.</p>
-    ${S.cats.map(c=>`<div class="row"><span class="l">${dot(c.c)}${esc(c.n)}</span><input data-lim="${esc(c.id)}" inputmode="decimal" aria-label="Limite para ${esc(c.n)}" style="width:120px;padding:8px 10px;font-size:15px" value="${valIn(S.limites[c.id])}" placeholder="—"></div>`).join('')}
+    ${catsAtivas().map(c=>`<div class="row"><span class="l">${dot(c.c)}${esc(c.n)}</span><input data-lim="${esc(c.id)}" inputmode="decimal" aria-label="Limite para ${esc(c.n)}" style="width:120px;padding:8px 10px" value="${valIn(S.limites[c.id])}" placeholder="—"></div>`).join('')}
     <button class="btn" data-act="saveLim">Salvar limites</button>`);
   return h;
 }
 
 /* ---------- Ajustes ---------- */
-const diasCartao = (af, av, k) => `<div class="two-in"><div><label>Dia de fechamento</label><input ${af} inputmode="numeric" value="${k?.fechamento ?? ''}" placeholder="ex: 5"></div><div><label>Dia de vencimento</label><input ${av} inputmode="numeric" value="${k?.vencimento ?? ''}" placeholder="ex: 12"></div></div>`;
+// cartões: uma linha por cartão; tocar abre o editor ali mesmo (um de cada vez). "Novo cartão" abre o mesmo editor vazio.
+function vCartaoEditor(k){
+  const novo = !k, cor = ui.cartaoCor;
+  return `<div class="kc-ed">
+    <div class="kc-ed-h"><span class="mini cc-${cor}" id="kMini"></span><b>${novo ? 'Novo cartão' : 'Editar cartão'}</b></div>
+    <label for="kNome">Nome do cartão</label><input id="kNome" maxlength="40" value="${esc(k?.nome||'')}" placeholder="ex: Nubank, Inter, Itaú…">
+    <div class="two-in">
+      <div><label for="kF">Dia que fecha</label><input id="kF" inputmode="numeric" value="${k?.fechamento ?? ''}" placeholder="ex: 5"></div>
+      <div><label for="kV">Dia que vence</label><input id="kV" inputmode="numeric" value="${k?.vencimento ?? ''}" placeholder="ex: 12"></div>
+    </div>
+    <label>Cor</label><div class="cores" role="group" aria-label="Cor do cartão">${CORES_CARTAO.map(c=>`<button class="cc-${c} ${cor===c?'on':''}" aria-pressed="${cor===c}" data-act="corCartao" data-v="${c}" aria-label="${c}"></button>`).join('')}</div>
+    <div class="btns"><button class="btn sec" data-act="cancelCartao">Cancelar</button><button class="btn" data-act="salvarCartao">${novo ? 'Adicionar' : 'Salvar'}</button></div>
+    ${!novo && cartoesAtivos().length>1 ? `<button class="kc-del" data-act="delCartao" data-id="${esc(k.id)}">Remover este cartão</button>` : ''}
+  </div>`;
+}
 function vCartoesAjustes(){
   const ativos = cartoesAtivos(), removidos = S.cartoes.filter(k=>k.arquivado);
+  const linha = k => ui.cartaoEd===k.id ? vCartaoEditor(k)
+    : `<button class="kc-row" data-act="edCartao" data-id="${esc(k.id)}" aria-label="Editar ${esc(k.nome)}"><span class="mini ${corCartao(k)}"></span><span class="kc-t"><b>${esc(k.nome)}</b><small>fecha dia ${k.fechamento} · vence dia ${k.vencimento}</small></span><span class="kc-ir">Editar</span></button>`;
   return fold('cartoes', 'Cartões', ativos.length>1 ? `${ativos.length} cartões` : esc(ativos[0]?.nome||''), `
-    <p class="note" style="margin:0 0 4px">Os dias de fechamento e vencimento estão no app do banco, na tela da fatura. Eles decidem em qual fatura cada compra cai e qual é o melhor dia de compra.</p>
-    ${ativos.map(k=>`<div class="cartao-ed"><div class="row catrow"><input data-kn="${esc(k.id)}" value="${esc(k.nome)}" maxlength="40" aria-label="Nome do cartão">${ativos.length>1 ? `<button class="x" data-act="delCartao" data-id="${esc(k.id)}" aria-label="Remover cartão ${esc(k.nome)}">×</button>` : ''}</div>${diasCartao(`data-kf="${esc(k.id)}"`, `data-kv="${esc(k.id)}"`, k)}<div class="cores" role="group" aria-label="Cor do cartão ${esc(k.nome)}">${CORES_CARTAO.map(c=>`<button class="cc-${c} ${k.cor===c?'on':''}" aria-pressed="${k.cor===c}" data-act="corCartao" data-id="${esc(k.id)}" data-v="${c}" aria-label="${c}"></button>`).join('')}</div></div>`).join('')}
-    <button class="btn" data-act="saveCartoes">Salvar cartões</button>
-    <div class="cartao-ed" style="margin-top:16px"><label for="nKn">Adicionar cartão</label><input id="nKn" maxlength="40" placeholder="ex: Nubank, Inter, Itaú…">${diasCartao('id="nKf"', 'id="nKv"', null)}</div>
-    <button class="btn sec" data-act="addCartao">Adicionar cartão</button>
+    <p class="note" style="margin:0 0 8px">Os dias que a fatura fecha e vence estão no app do banco. Toque num cartão para mudar.</p>
+    ${ativos.map(linha).join('')}
+    ${ui.cartaoEd==='novo' ? vCartaoEditor(null) : ui.cartaoEd ? '' : `<button class="btn sec" data-act="edCartao" data-id="novo" style="margin-top:12px">+ Novo cartão</button>`}
     ${removidos.length ? `<p class="note">Removidos (continuam nas faturas passadas): ${removidos.map(k=>esc(k.nome)).join(', ')}.</p>` : ''}`, !S.config.configurado);
 }
+
+// escondidas + padrão que não existem mais (apagadas em versões antigas do app)
+const catsGuardadas = () => [...S.cats.filter(c=>c.oculta), ...CATS.filter(d=>!S.cats.some(c=>c.id===d.id))];
 
 function vAjustes(){
   const c = S.config, d = diasSemBackup();
@@ -371,11 +396,12 @@ function vAjustes(){
 
   ${vCartoesAjustes()}
 
-  ${fold('cats-ed', 'Categorias', String(S.cats.length), `
-    <p class="note" style="margin:0 0 6px">Mude nome e cor, apague ou crie categorias. Ao apagar, os lançamentos dela vão para "Outros".</p>
-    ${S.cats.map(k=>`<div class="row catrow"><input type="color" data-catc="${esc(k.id)}" value="${k.c}" aria-label="Cor de ${esc(k.n)}"><input data-catn="${esc(k.id)}" value="${esc(k.n)}" maxlength="40" aria-label="Nome da categoria">${k.id==='outros' ? '<span class="xph"></span>' : `<button class="x" data-act="delCat" data-id="${esc(k.id)}" aria-label="Apagar categoria ${esc(k.n)}">×</button>`}</div>`).join('')}
+  ${fold('cats-ed', 'Categorias', String(catsAtivas().length), `
+    <p class="note" style="margin:0 0 6px">Toque no × para tirar uma categoria das opções. Ela fica guardada aqui embaixo e volta com um toque.</p>
+    ${catsAtivas().map(k=>`<div class="row catrow"><input type="color" data-catc="${esc(k.id)}" value="${k.c}" aria-label="Cor de ${esc(k.n)}"><input data-catn="${esc(k.id)}" value="${esc(k.n)}" maxlength="40" aria-label="Nome da categoria">${k.id==='outros' ? '<span class="xph"></span>' : `<button class="x" data-act="escCat" data-id="${esc(k.id)}" aria-label="Tirar ${esc(k.n)}">×</button>`}</div>`).join('')}
     <div class="row catrow"><input type="color" id="nCatC" value="#0ea5e9" aria-label="Cor da nova categoria"><input id="nCat" maxlength="40" placeholder="Nova categoria" aria-label="Nome da nova categoria"><button class="x" data-act="addCat" aria-label="Adicionar categoria">+</button></div>
-    <button class="btn" data-act="saveCats">Salvar categorias</button>`)}
+    ${catsGuardadas().length ? `<label>Fora das opções (toque para voltar)</label><div class="chips">${catsGuardadas().map(k=>`<button class="chip volta" data-act="voltaCat" data-id="${esc(k.id)}">${dot(k.c)}${esc(k.n)} <b>+</b></button>`).join('')}</div>` : ''}
+    <button class="btn" data-act="saveCats">Salvar nomes e cores</button>`)}
 
   ${fold('csv', 'Importar fatura (CSV)', '', `
     <p class="note" style="margin-top:0">Baixe a fatura em CSV pelo internet banking e importe aqui. O app tenta achar data, descrição e valor sozinho, categoriza pelo nome do estabelecimento (iFood, posto, mercado…) e ignora linhas repetidas, estornos e o pagamento da fatura.</p>

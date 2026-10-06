@@ -43,7 +43,7 @@ export function normalize(d){
   const cartaoIds = new Set(cartoes.map(k=>k.id)), cartao1 = cartoes.find(k=>!k.arquivado).id;
   const comCartao = (obj, x) => { if(obj.meio==='cartao') obj.cartao = cartaoIds.has(x.cartao) ? x.cartao : cartao1; return obj; };
 
-  const cats = keep(d.cats ?? CATS, x=>ID.test(x.id) && typeof x.n==='string' && x.n.trim() && COR.test(x.c)).map(x=>({id:x.id, n:str(x.n,40), c:x.c.toLowerCase()}));
+  const cats = keep(d.cats ?? CATS, x=>ID.test(x.id) && typeof x.n==='string' && x.n.trim() && COR.test(x.c)).map(x=>{ const k = {id:x.id, n:str(x.n,40), c:x.c.toLowerCase()}; if(x.oculta && x.id!=='outros') k.oculta = true; return k; });
   if(!cats.some(x=>x.id==='outros')) cats.push({...CATS.find(x=>x.id==='outros')});
   const catIds = new Set(cats.map(x=>x.id)), meioIds = new Set(MEIOS.map(m=>m.id));
   const cat = id => catIds.has(id) ? id : 'outros';

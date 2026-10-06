@@ -205,22 +205,33 @@ test('metas: guardar sai da sobra; remover a meta mantém o histórico', async()
   await ctx.close();
 });
 
-test('categorias: criar, renomear e apagar (lançamentos vão para Outros)', async()=>{
-  const {page, ctx} = await abrir(estado({gastos:[{id:'g1', data:iso(0), valor:10, cat:'delivery', meio:'pix', desc:'', criado:1}], limites:{delivery:100}}));
+test('categorias: criar, renomear, tirar e voltar com um toque', async()=>{
+  const {page, ctx} = await abrir(estado({gastos:[{id:'g1', data:iso(0), valor:10, cat:'delivery', meio:'pix', desc:'', criado:1}], limites:{delivery:100},
+    cats:[{id:'mercado',n:'Mercado',c:'#22c55e'},{id:'delivery',n:'Delivery',c:'#ef4444'},{id:'outros',n:'Outros',c:'#94a3b8'}]}));
   await aba(page,'ajustes'); await secao(page,'cats-ed');
   await page.fill('#nCat','Pets'); await page.click('[data-act="addCat"]');
   let s = await lerEstado(page);
   const pets = s.cats.find(c=>c.n==='Pets'); assert.ok(pets);
   await page.fill(`[data-catn="${pets.id}"]`, 'Pet shop'); await page.click('[data-act="saveCats"]');
-  await page.click('[data-act="delCat"][data-id="delivery"]');
+  // tirar: some das opções, mas o lançamento continua nela
+  await page.click('[data-act="escCat"][data-id="delivery"]');
   s = await lerEstado(page);
-  assert.ok(s.cats.some(c=>c.n==='Pet shop'));
-  assert.ok(!s.cats.some(c=>c.id==='delivery'));
-  assert.equal(s.gastos[0].cat, 'outros');
-  assert.equal(s.limites.delivery, undefined);
-  assert.equal(await page.$('[data-act="delCat"][data-id="outros"]'), null, '"Outros" não pode ser apagada');
+  assert.equal(s.cats.find(c=>c.id==='delivery').oculta, true);
+  assert.equal(s.gastos[0].cat, 'delivery', 'o lançamento não muda de categoria');
+  assert.equal(await page.$('[data-act="escCat"][data-id="outros"]'), null, '"Outros" não pode sair');
   await aba(page,'lancar');
+  assert.equal(await page.$('[data-act="dCat"][data-id="delivery"]'), null, 'não aparece para lançar');
   assert.match(await page.textContent('#view'), /Pet shop/);
+  // padrões que não estão na lista (ex.: Carro) também aparecem para voltar
+  await aba(page,'ajustes');
+  assert.ok(await page.$('[data-act="voltaCat"][data-id="carro"]'));
+  await page.click('[data-act="voltaCat"][data-id="delivery"]');
+  await page.click('[data-act="voltaCat"][data-id="carro"]');
+  s = await lerEstado(page);
+  assert.equal(s.cats.find(c=>c.id==='delivery').oculta, undefined);
+  assert.ok(s.cats.some(c=>c.id==='carro'));
+  await aba(page,'lancar');
+  assert.ok(await page.$('[data-act="dCat"][data-id="delivery"]'));
   await ctx.close();
 });
 
@@ -449,8 +460,11 @@ test('vários cartões: cada compra cai na fatura do seu cartão', async()=>{
   await page.fill('#gValor','40'); await page.fill('#gData', ym(0)+'-10'); await page.click('[data-act="saveG"]');
   await aba(page,'lancar');
   await page.click('[data-act="dCartao"][data-id="k2"]'); await page.click('[data-act="dParc"][data-v="1"]');
-  await page.fill('#gValor','300'); await page.fill('#gParc','3'); await page.fill('#gData', ym(0)+'-10'); await page.click('[data-act="saveG"]');
+  await page.fill('#gValor','100'); await page.fill('#gParc','3');
+  assert.match(await page.textContent('#gTotal'), /3x de R\$\s?100,00 = R\$\s?300,00/);
+  await page.fill('#gDesc','Fone'); await page.fill('#gData', ym(0)+'-10'); await page.click('[data-act="saveG"]');
   const s = await lerEstado(page);
+  assert.deepEqual([s.recorrentes[0].nome, s.recorrentes[0].valor, s.recorrentes[0].parcelas], ['Fone', 100, 3], 'o valor digitado é o de cada parcela');
   assert.deepEqual(s.gastos.map(g=>g.cartao), ['k2','k1']);
   assert.equal(s.recorrentes[0].cartao, 'k2');
   assert.equal(s.recorrentes[0].inicio, ym(1), 'Inter: compra dia 10, fecha 25, vence dia 5 do mês seguinte');
@@ -465,22 +479,35 @@ test('vários cartões: cada compra cai na fatura do seu cartão', async()=>{
 test('cartões em Ajustes: adicionar, editar e remover', async()=>{
   const {page, ctx} = await abrir(estado({gastos:[{id:'g1', data:iso(0), valor:10, cat:'mercado', meio:'cartao', cartao:'k1', desc:'', criado:1}]}));
   await aba(page,'ajustes'); await secao(page,'cartoes');
-  assert.equal(await page.$('[data-act="delCartao"]'), null, 'não dá para remover o único cartão');
-  await page.fill('#nKn','Inter'); await page.fill('#nKf','25'); await page.fill('#nKv','5'); await page.click('[data-act="addCartao"]');
+  assert.equal(await page.$('#kNome'), null, 'nenhum campo de nome antes de tocar em algo');
+  // novo cartão
+  await page.click('[data-act="edCartao"][data-id="novo"]');
+  assert.equal(await page.$$eval('#kNome', x=>x.length), 1, 'só um campo de nome na tela');
+  await page.fill('#kNome','Inter'); await page.fill('#kF','25'); await page.fill('#kV','5'); await page.click('[data-act="salvarCartao"]');
   let s = await lerEstado(page);
   const inter = s.cartoes.find(k=>k.nome==='Inter');
   assert.deepEqual([inter.fechamento, inter.vencimento], [25, 5]);
-  await page.fill('[data-kv="k1"]','40'); await page.click('[data-act="saveCartoes"]');
+  assert.notEqual(inter.cor, s.cartoes[0].cor, 'cartão novo ganha uma cor ainda não usada');
+  assert.equal(await page.$('#kNome'), null, 'o editor fecha depois de salvar');
+  // editar: dia inválido é recusado
+  await page.click('[data-act="edCartao"][data-id="k1"]');
+  await page.fill('#kV','40'); await page.click('[data-act="salvarCartao"]');
   assert.match(await toastTxt(page), /Confira os dias/);
-  await page.fill('[data-kv="k1"]','15'); await page.fill('[data-kn="k1"]','Nubank roxinho'); await page.click('[data-act="saveCartoes"]');
+  await page.fill('#kV','15'); await page.fill('#kNome','Nubank roxinho'); await page.click('[data-act="salvarCartao"]');
   s = await lerEstado(page);
   assert.deepEqual([s.cartoes[0].nome, s.cartoes[0].vencimento], ['Nubank roxinho', 15]);
+  // cancelar não muda nada
+  await page.click('[data-act="edCartao"][data-id="k1"]'); await page.fill('#kNome','xxx'); await page.click('[data-act="cancelCartao"]');
+  assert.equal((await lerEstado(page)).cartoes[0].nome, 'Nubank roxinho');
   // com lançamentos: só sai das opções, continua nas faturas
-  await page.click('[data-act="delCartao"][data-id="k1"]');
+  await page.click('[data-act="edCartao"][data-id="k1"]'); await page.click('[data-act="delCartao"][data-id="k1"]');
   s = await lerEstado(page);
   assert.equal(s.cartoes.find(k=>k.id==='k1').arquivado, true);
   assert.equal(s.gastos[0].cartao, 'k1');
   assert.match(await page.textContent('#view'), /Removidos .*Nubank roxinho/);
+  // o único cartão que sobrou não pode ser removido
+  await page.click(`[data-act="edCartao"][data-id="${inter.id}"]`);
+  assert.equal(await page.$('[data-act="delCartao"]'), null, 'não dá para remover o único cartão');
   await aba(page,'lancar');
   assert.equal(await page.$('[data-act="dCartao"]'), null, 'com um cartão ativo não pergunta qual');
   await ctx.close();
@@ -502,7 +529,11 @@ test('CSV com mais de um cartão pergunta de qual cartão é a fatura', async()=
 test('cor do cartão: escolher em Ajustes muda o cartão no Início', async()=>{
   const {page, ctx, errors} = await abrir(estado());
   await aba(page,'ajustes'); await secao(page,'cartoes');
-  await page.click('[data-act="corCartao"][data-id="k1"][data-v="oceano"]');
+  await page.click('[data-act="edCartao"][data-id="k1"]');
+  await page.fill('#kNome','Nubank editado');
+  await page.click('[data-act="corCartao"][data-v="oceano"]');
+  assert.equal(await page.inputValue('#kNome'), 'Nubank editado', 'escolher a cor não apaga o que foi digitado');
+  await page.click('[data-act="salvarCartao"]');
   assert.equal((await lerEstado(page)).cartoes[0].cor, 'oceano');
   await aba(page,'inicio');
   assert.ok(await page.$('.ccard.cc-oceano'));

@@ -69,7 +69,7 @@ export function initImports(){
       const k = iso+'|'+valor+'|'+desc.toUpperCase();
       if(existe.has(k)){ ignor++; continue; }
       existe.add(k);
-      let cat='outros'; for(const [re,c] of RULES){ if(re.test(desc) && S.cats.some(x=>x.id===c)){ cat=c; break; } }
+      let cat='outros'; for(const [re,c] of RULES){ if(re.test(desc) && S.cats.some(x=>x.id===c && !x.oculta)){ cat=c; break; } }
       novos.push({id:uid(), data:iso, valor, cat, meio:'cartao', desc:desc.slice(0,60), criado:Date.now()});
     }
     if(!novos.length) return toast(ignor||creditos?'Nada novo — tudo já estava lançado ou era estorno/pagamento':'Não reconheci lançamentos nesse arquivo');
