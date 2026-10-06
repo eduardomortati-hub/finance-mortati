@@ -224,9 +224,18 @@ test('categorias: criar, renomear, tirar e voltar com um toque', async()=>{
   assert.match(await page.textContent('#view'), /Pet shop/);
   // padrões que não estão na lista (ex.: Carro) também aparecem para voltar
   await aba(page,'ajustes');
-  assert.ok(await page.$('[data-act="voltaCat"][data-id="carro"]'));
+  assert.equal(await page.isVisible('#catSug'), false, 'a lista só aparece ao tocar no campo');
+  await page.click('#nCat');
+  assert.ok(await page.isVisible('[data-act="voltaCat"][data-id="carro"]'));
+  await page.fill('#nCat', 'deliv');
+  assert.equal(await page.$('#catSug [data-act="voltaCat"][data-id="carro"]'), null, 'filtra enquanto digita');
   await page.click('[data-act="voltaCat"][data-id="delivery"]');
+  await page.click('#nCat');
   await page.click('[data-act="voltaCat"][data-id="carro"]');
+  await page.click('#nCat'); await page.fill('#nCat', 'Viagens');
+  assert.match(await page.textContent('#catSug'), /Criar "Viagens"/);
+  await page.click('#catSug [data-act="addCat"]');
+  assert.ok((await lerEstado(page)).cats.some(c=>c.n==='Viagens'));
   s = await lerEstado(page);
   assert.equal(s.cats.find(c=>c.id==='delivery').oculta, undefined);
   assert.ok(s.cats.some(c=>c.id==='carro'));

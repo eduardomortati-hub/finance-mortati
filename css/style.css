@@ -217,8 +217,15 @@ input[type=color]{flex:none;width:36px;height:36px;padding:3px;border-radius:10p
 .catrow{gap:8px}
 .catrow input:not([type=color]){flex:1;min-width:0;padding:9px 12px;font-size:16px}
 .catrow .xph{width:30px;flex:none}
-.chip.volta{border-style:dashed;color:var(--mut)}
-.chip.volta b{color:var(--ink);margin-left:2px}
+.cat-add{position:relative}
+.sugest{position:absolute;left:0;right:0;top:calc(100% - 4px);z-index:4;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-ctl);
+  box-shadow:0 14px 34px -10px rgba(0,0,0,.55);max-height:264px;overflow-y:auto;padding:6px;animation:sobe .16s ease-out}
+.sugest[hidden]{display:none}
+.sug{display:flex;align-items:center;width:100%;background:none;border:0;border-radius:calc(var(--r-ctl) - 4px);padding:12px 10px;font-size:15px;text-align:left;cursor:pointer}
+.sug:hover,.sug:active{background:var(--surface-2)}
+.sug.novo{color:var(--accent);font-weight:600}
+[data-theme=light] .sug.novo{color:var(--pos)}
+.sug.vazio{color:var(--mut);cursor:default;font-size:14px}
 .mini{flex:none;width:42px;height:28px;border-radius:6px;box-shadow:inset 0 1px 0 rgba(255,255,255,.15)}
 .kc-row{display:flex;align-items:center;gap:12px;width:100%;background:none;border:0;border-top:1px solid var(--line);padding:12px 0;text-align:left;cursor:pointer;font-size:15px}
 .kc-row:first-of-type{border-top:0}

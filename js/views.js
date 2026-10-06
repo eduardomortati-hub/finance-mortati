@@ -386,6 +386,19 @@ function vCartoesAjustes(){
 // escondidas + padrão que não existem mais (apagadas em versões antigas do app)
 const catsGuardadas = () => [...S.cats.filter(c=>c.oculta), ...CATS.filter(d=>!S.cats.some(c=>c.id===d.id))];
 
+// caixa de sugestões do campo "Adicionar categoria": aparece só com o campo em foco e filtra enquanto digita
+export function sugestoesCat(aberta=true){
+  const box = $('#catSug'), inp = $('#nCat'); if(!box || !inp) return;
+  const txt = inp.value.trim(), q = normTxt(txt);
+  const itens = catsGuardadas().filter(k=>!q || normTxt(k.n).includes(q));
+  let h = itens.map(k=>`<button class="sug" role="option" data-act="voltaCat" data-id="${esc(k.id)}">${dot(k.c)}${esc(k.n)}</button>`).join('');
+  if(q && !S.cats.some(c=>!c.oculta && normTxt(c.n)===q) && !itens.some(k=>normTxt(k.n)===q)) h += `<button class="sug novo" role="option" data-act="addCat">+ Criar "${esc(txt)}"</button>`;
+  if(!h) h = `<div class="sug vazio">${q ? 'Essa categoria já está na lista' : 'Digite o nome da nova categoria'}</div>`;
+  box.innerHTML = h;
+  box.hidden = !aberta;
+  inp.setAttribute('aria-expanded', String(aberta));
+}
+
 function vAjustes(){
   const c = S.config, d = diasSemBackup();
   const ultimo = d===null ? 'Nenhum backup feito ainda.' : `Último backup: ${dLabel(c.ultimoBackup)}/${c.ultimoBackup.slice(0,4)} (${d===0?'hoje':d===1?'ontem':`há ${d} dias`}).`;
@@ -397,10 +410,10 @@ function vAjustes(){
   ${vCartoesAjustes()}
 
   ${fold('cats-ed', 'Categorias', String(catsAtivas().length), `
-    <p class="note" style="margin:0 0 6px">Toque no × para tirar uma categoria das opções. Ela fica guardada aqui embaixo e volta com um toque.</p>
+    <p class="note" style="margin:0 0 6px">O × tira a categoria das opções. Para trazer de volta, toque em "Adicionar categoria" e escolha na lista.</p>
     ${catsAtivas().map(k=>`<div class="row catrow"><input type="color" data-catc="${esc(k.id)}" value="${k.c}" aria-label="Cor de ${esc(k.n)}"><input data-catn="${esc(k.id)}" value="${esc(k.n)}" maxlength="40" aria-label="Nome da categoria">${k.id==='outros' ? '<span class="xph"></span>' : `<button class="x" data-act="escCat" data-id="${esc(k.id)}" aria-label="Tirar ${esc(k.n)}">×</button>`}</div>`).join('')}
-    <div class="row catrow"><input type="color" id="nCatC" value="#0ea5e9" aria-label="Cor da nova categoria"><input id="nCat" maxlength="40" placeholder="Nova categoria" aria-label="Nome da nova categoria"><button class="x" data-act="addCat" aria-label="Adicionar categoria">+</button></div>
-    ${catsGuardadas().length ? `<label>Fora das opções (toque para voltar)</label><div class="chips">${catsGuardadas().map(k=>`<button class="chip volta" data-act="voltaCat" data-id="${esc(k.id)}">${dot(k.c)}${esc(k.n)} <b>+</b></button>`).join('')}</div>` : ''}
+    <div class="cat-add"><div class="row catrow"><input type="color" id="nCatC" value="#0ea5e9" aria-label="Cor da nova categoria"><input id="nCat" maxlength="40" placeholder="Adicionar categoria" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="catSug" aria-label="Adicionar categoria"><button class="x" data-act="addCat" aria-label="Adicionar categoria">+</button></div>
+      <div class="sugest" id="catSug" role="listbox" hidden></div></div>
     <button class="btn" data-act="saveCats">Salvar nomes e cores</button>`)}
 
   ${fold('csv', 'Importar fatura (CSV)', '', `
