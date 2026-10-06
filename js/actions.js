@@ -179,6 +179,51 @@ export const A = {
     m.atual = novo; (m.movs ||= []).push({data:todayISO(), valor:delta});
     save(); toast(s>0?'Boa! 💪':'Retirada registrada'); render();
   },
+  /* investimentos */
+  invEd(d){ ui.invEd = ui.invEd===d.id ? null : d.id; render(); },
+  invTipo(d){ ui.invNovoTipo = d.v; keepInv(); },
+  invJa(d){ ui.invNovoJa = d.v==='1'; keepInv(); },
+  saveInv(){
+    const nome = $('#iNome').value.trim().slice(0,60), saldo = parseNum($('#iSaldo').value || '0');
+    if(!nome) return toast('Dê um nome ao investimento');
+    if(!(saldo>=0)) return toast('Confira o valor');
+    const inv = {id:'i'+uid(), nome, tipo:ui.invNovoTipo, saldo:round2(saldo), movs:[]};
+    if(!ui.invNovoJa && saldo>0) inv.movs.push({data:todayISO(), valor:round2(saldo)});   // aplicação de agora: sai da sobra
+    S.investimentos.push(inv);
+    ui.invNovoJa = true; ui.invEd = null; ui.abertos.delete('novoInv');
+    save(); toast('Investimento adicionado ✓'); render();
+  },
+  async invMov(d){
+    const i = S.investimentos.find(x=>x.id===d.id), s = Number(d.s); if(!i) return;
+    const r = await ask({titulo: s>0 ? `Aplicar em "${i.nome}"` : `Resgatar de "${i.nome}"`,
+      texto: s>0 ? 'Esse valor sai da sobra deste mês.' : 'Esse valor volta para a sobra deste mês.',
+      campos:[{id:'v', rotulo:'Valor', inputmode:'decimal', placeholder:'0,00'}],
+      botoes:[{id:'ok', rotulo: s>0 ? 'Aplicar' : 'Resgatar'}],
+      validar:(b,v)=>{ const n = parseNum(v.v); return !(n>0) ? 'Digite um valor' : s<0 && n>i.saldo+0.004 ? `O saldo é ${fmtReal(i.saldo)}` : ''; }});
+    if(!r) return;
+    const v = round2(parseNum(r.valores.v)) * s;
+    i.saldo = round2(Math.max(0, i.saldo + v)); i.movs.push({data:todayISO(), valor:v});
+    save(); toast(s>0 ? 'Aplicação registrada ✓' : 'Resgate registrado ✓'); render();
+  },
+  async invSaldo(d){
+    const i = S.investimentos.find(x=>x.id===d.id); if(!i) return;
+    const r = await ask({titulo:`Saldo de "${i.nome}"`, texto:`Veja no app do banco quanto tem hoje. A diferença para ${fmtReal(i.saldo)} entra como rendimento e não mexe na sobra.`,
+      campos:[{id:'v', rotulo:'Saldo hoje', inputmode:'decimal', placeholder:valIn(i.saldo)||'0,00'}],
+      botoes:[{id:'ok', rotulo:'Atualizar'}],
+      validar:(b,v)=> parseNum(v.v)>=0 ? '' : 'Digite o saldo'});
+    if(!r) return;
+    const novo = round2(parseNum(r.valores.v)), delta = round2(novo - i.saldo);
+    if(!delta) return toast('Saldo igual ao anterior');
+    i.saldo = novo; i.movs.push({data:todayISO(), valor:delta, rend:true});
+    save(); toast(delta>0 ? `Rendeu ${fmtReal(delta)} ✓` : `Caiu ${fmtReal(-delta)}`); render();
+  },
+  // remover: sai da lista, mas aplicações e resgates continuam contando nos meses em que aconteceram
+  invArq(d){
+    const i = S.investimentos.find(x=>x.id===d.id); if(!i) return;
+    i.arquivado = true; ui.invEd = null; save(); render();
+    toast(`"${i.nome}" removido`, {rotulo:'Desfazer', fn:()=>{ delete i.arquivado; save(); render(); }});
+  },
+
   saveLim(){ document.querySelectorAll('[data-lim]').forEach(i=>{ const v=parseNum(i.value); if(v>0) S.limites[i.dataset.lim]=round2(v); else delete S.limites[i.dataset.lim]; }); save(); toast('Limites salvos ✓'); },
 
   saveCats(){ lerCats(); save(); toast('Categorias salvas ✓'); render(); },
@@ -271,6 +316,12 @@ export const A = {
   pickCsv(){ $('#fileCsv').click(); },
   reset(){ if(!confirm('Apagar TODOS os dados deste aparelho? Exporte um backup antes se quiser guardar.')) return; setS(empty()); ui.tab='inicio'; render(); }
 };
+
+function keepInv(){ // re-renderiza o formulário de novo investimento sem perder o que foi digitado
+  const n = $('#iNome')?.value, v = $('#iSaldo')?.value;
+  render();
+  if(n) $('#iNome').value = n; if(v) $('#iSaldo').value = v;
+}
 
 function keepDraft(){ // re-renderiza mantendo o que já foi digitado
   const keep={v:$('#gValor')?.value, d:$('#gData')?.value, s:$('#gDesc')?.value, p:$('#gParc')?.value};

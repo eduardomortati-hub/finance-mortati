@@ -130,6 +130,20 @@ html.discreto .pills .v,html.discreto .proj b{visibility:hidden}
 .legend b{font-weight:600;white-space:nowrap}
 
 
+/* ---------- investimentos ---------- */
+.inv-hero .legend b{font-weight:600}
+.inv-lista{padding-top:4px;padding-bottom:4px}
+.inv{border-top:1px solid var(--line)}
+.inv:first-child{border-top:0}
+.inv-row{display:flex;align-items:center;width:100%;gap:0;background:none;border:0;padding:12px 0;text-align:left;cursor:pointer;font-size:15px}
+.inv-row .ico{color:#15210a}
+.inv-v{font-weight:650;white-space:nowrap;margin-left:10px}
+.inv-acoes{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:2px 0 4px}
+.inv-acoes button{background:var(--surface-2);border:0;border-radius:var(--r-ctl);padding:12px 4px 10px;display:flex;flex-direction:column;align-items:center;gap:6px;font-size:12.5px;cursor:pointer;color:var(--ink);font-family:inherit}
+.inv-acoes button:first-child{background:var(--accent);color:var(--on-accent)}
+.inv-acoes svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.inv.on .kc-del{margin:6px auto 8px}
+
 /* ---------- cartões de crédito ---------- */
 .carteira{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;margin:0 -16px;padding:0 16px 4px;scrollbar-width:none}
 .carteira::-webkit-scrollbar{display:none}

@@ -1,11 +1,11 @@
-import { CATS, MEIOS, RULES, CORES_CARTAO, meioOf } from './config.js';
+import { CATS, MEIOS, RULES, CORES_CARTAO, TIPOS_INV, tipoInv, meioOf } from './config.js';
 import { S, catOf, catsAtivas, cartaoOf, cartoesAtivos } from './store.js';
-import { calc, recInMonth, faturaPeriodo, vencimentoData, infoCartao } from './finance.js';
+import { calc, recInMonth, faturaPeriodo, vencimentoData, infoCartao, rendimentoNoMes } from './finance.js';
 import { $, esc, fmt, todayISO, thisMonth, addM, diffM, mLabel, dLabel, sum, normTxt, diasEntre, addDias, valIn, parseNum, fmtReal, discreto } from './util.js';
 
 // estado da interface (não é salvo)
 export const ui = {tab:'inicio', mes:thisMonth(), draft:{tipo:'gasto', cat:null, meio:'cartao', parcelado:false},
-  editId:null, editG:null, cartaoEd:null, cartaoCor:null, busca:{q:'', cat:'', meio:''}, buscaAberta:false,
+  editId:null, editG:null, cartaoEd:null, cartaoCor:null, invEd:null, invNovoTipo:'cdb', invNovoJa:true, busca:{q:'', cat:'', meio:''}, buscaAberta:false,
   abertos:new Set()};   // seções recolhíveis que a pessoa abriu (data-fold)
 
 const ymBR = k => mLabel(k,true)+'/'+k.slice(2,4);
@@ -20,7 +20,8 @@ export const meioLabel = x => x.meio==='cartao' && S.cartoes.length>1 ? cartaoOf
 
 let lastTab = null;
 export function render(){
-  if(ui.tab!=='ajustes') ui.cartaoEd = null;   // sair de Ajustes descarta a edição de cartão pela metade
+  if(ui.tab!=='ajustes') ui.cartaoEd = null;
+  if(ui.tab!=='metas') ui.invEd = null;   // sair de Ajustes descarta a edição de cartão pela metade
   document.querySelectorAll('nav button').forEach(b=>{
     const on = b.dataset.t===ui.tab;
     b.classList.toggle('on', on);
@@ -68,7 +69,7 @@ function vHero(c){
     ['Cartões', c.fatura, 'var(--lav)'],
     ['Fixos', c.fixosFora, 'var(--blue)'],
     ['Pix e débito', c.avulsos, 'var(--amb)'],
-    ['Metas', Math.max(0, c.guardado), '#5fd4b4'],
+    ['Guardado', Math.max(0, c.guardado), '#5fd4b4'],
     ['Sobra', Math.max(0, c.sobra), 'var(--accent)']
   ];
   const base = Math.max(1, sum(partes, p=>p[1]));
@@ -92,8 +93,8 @@ function vHero(c){
     <div class="mais">Detalhes</div></summary>
     <div class="det">
       <div class="legend">
-        ${partes.slice(0,4).filter(p=>p[1]>0 || p[0]!=='Metas').map(p=>`<div><span><i class="dot" style="background:${p[2]}"></i>${p[0]}</span><b>${fmt(p[1])}</b></div>`).join('')}
-        ${c.guardado<0 ? `<div><span>Retirado de metas</span><b class="pos">+ ${fmt(-c.guardado)}</b></div>` : ''}
+        ${partes.slice(0,4).filter(p=>p[1]>0 || p[0]!=='Guardado').map(p=>`<div><span><i class="dot" style="background:${p[2]}"></i>${p[0]}</span><b>${fmt(p[1])}</b></div>`).join('')}
+        ${c.guardado<0 ? `<div><span>Resgatado</span><b class="pos">+ ${fmt(-c.guardado)}</b></div>` : ''}
       </div>
       ${linhas ? `<div style="margin-top:10px">${linhas}</div>` : ''}
       ${c.faturaFixos ? `<p class="note">A fatura inclui ${fmt(c.faturaFixos)} de parcelas e fixos no cartão.</p>` : ''}
@@ -355,10 +356,59 @@ function vFixos(){
   return h;
 }
 
-/* ---------- Metas ---------- */
+/* ---------- Guardado: investimentos e metas ---------- */
+const INV_ICON = {
+  ap:'<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
+  rs:'<svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg>',
+  at:'<svg viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 8-8M15 7h6v6"/></svg>'
+};
+function vInvestimentos(){
+  const invs = S.investimentos.filter(i=>!i.arquivado);
+  const total = sum(invs, i=>i.saldo), rend = rendimentoNoMes(thisMonth());
+  let h = '';
+  if(invs.length){
+    const porTipo = TIPOS_INV.map(t=>({t, v:sum(invs.filter(i=>i.tipo===t.id), i=>i.saldo)})).filter(x=>x.v>0);
+    const fixa = sum(porTipo.filter(x=>x.t.fixa), x=>x.v), base = Math.max(1, total);
+    h += `<div class="card hero inv-hero">
+      <div class="lbl">Total investido</div>
+      <div class="big">${valorHTML(total)}</div>
+      <div class="sub">${rend ? `<span class="${rend>0?'pos':'neg'}">${rend>0?'+':'−'} ${fmt(Math.abs(rend))}</span> de rendimento este mês` : 'Atualize os saldos para acompanhar o rendimento'}</div>
+      <div class="stack" aria-hidden="true">${porTipo.map(x=>`<i style="flex:${x.v/base};background:${x.t.c}"></i>`).join('')}</div>
+      <div class="legend">${porTipo.map(x=>`<div><span><i class="dot" style="background:${x.t.c}"></i>${x.t.n}</span><b>${Math.round(x.v/base*100)}%</b></div>`).join('')}</div>
+      ${total ? `<p class="note">Renda fixa ${Math.round(fixa/base*100)}% · renda variável ${100-Math.round(fixa/base*100)}%</p>` : ''}
+    </div>`;
+    h += secH('Seus investimentos', `${invs.length}`);
+    h += `<div class="card inv-lista">${invs.map(i=>{
+      const t = tipoInv(i.tipo), aberto = ui.invEd===i.id;
+      return `<div class="inv ${aberto?'on':''}">
+        <button class="inv-row" data-act="invEd" data-id="${esc(i.id)}" aria-expanded="${aberto}"><span class="ico" style="background:${t.c};color:#15210a">${esc(t.n[0])}</span><span class="kc-t"><b>${esc(i.nome)}</b><small>${t.n}</small></span><b class="inv-v">${fmt(i.saldo)}</b></button>
+        ${aberto ? `<div class="inv-acoes">
+          <button data-act="invMov" data-id="${esc(i.id)}" data-s="1">${INV_ICON.ap}Aplicar</button>
+          <button data-act="invMov" data-id="${esc(i.id)}" data-s="-1">${INV_ICON.rs}Resgatar</button>
+          <button data-act="invSaldo" data-id="${esc(i.id)}">${INV_ICON.at}Atualizar saldo</button>
+        </div>
+        <button class="kc-del" data-act="invArq" data-id="${esc(i.id)}">Remover investimento</button>` : ''}
+      </div>`;
+    }).join('')}</div>
+    <p class="note" style="margin:8px 4px 0">Aplicar sai da sobra do mês e resgatar volta para ela. Atualizar saldo registra o rendimento, sem mexer na sobra.</p>`;
+  }
+  const tipoSel = ui.invNovoTipo;
+  h += fold('novoInv', invs.length ? 'Novo investimento' : 'Adicionar investimento', '', `
+    <label for="iNome" style="margin-top:0">Nome</label><input id="iNome" maxlength="60" placeholder="ex: CDB Nubank, Tesouro Selic 2029" autocomplete="off">
+    <label>Tipo</label><div class="chips">${TIPOS_INV.map(t=>`<button class="chip ${tipoSel===t.id?'on':''}" aria-pressed="${tipoSel===t.id}" data-act="invTipo" data-v="${t.id}">${t.n}</button>`).join('')}</div>
+    <label for="iSaldo">Quanto tem aplicado</label><input id="iSaldo" inputmode="decimal" placeholder="0,00" autocomplete="off">
+    <label>Esse dinheiro…</label><div class="chips">
+      <button class="chip ${ui.invNovoJa?'on':''}" aria-pressed="${ui.invNovoJa}" data-act="invJa" data-v="1">Já estava guardado</button>
+      <button class="chip ${!ui.invNovoJa?'on':''}" aria-pressed="${!ui.invNovoJa}" data-act="invJa" data-v="0">Estou aplicando agora</button></div>
+    <p class="note">${ui.invNovoJa ? 'Não mexe na sobra deste mês.' : 'Sai da sobra deste mês.'}</p>
+    <button class="btn" data-act="saveInv">Adicionar investimento</button>`, !invs.length);
+  return h;
+}
+
 function vMetas(){
   const metas = S.metas.filter(m=>!m.arquivada);
-  let h = metas.length ? `<div class="grid two" style="margin-bottom:2px">` : `<div>`;
+  let h = vInvestimentos() + secH('Metas', '');
+  h += metas.length ? `<div class="grid two" style="margin-bottom:2px">` : `<div>`;
   metas.forEach(m=>{
     const p = m.alvo ? Math.min(100, m.atual/m.alvo*100) : 0;
     h += `<div class="card"><div style="display:flex;justify-content:space-between;align-items:start"><h2>${esc(m.nome)}</h2><button class="x" data-act="arqM" data-id="${esc(m.id)}" aria-label="Remover meta">×</button></div>
@@ -368,7 +418,7 @@ function vMetas(){
     </div>`;
   });
   h += `</div>`;
-  if(metas.length) h += `<p class="note" style="margin:8px 4px 0">O que você guarda sai da sobra do mês; o que retira volta para ela.</p>`;
+  if(metas.length) h += `<p class="note" style="margin:8px 4px 0">O que você guarda numa meta sai da sobra do mês; o que retira volta para ela.</p>`;
   h += fold('novaM', 'Nova meta', '', `
     <div class="two-in"><div><label for="mNome">Nome</label><input id="mNome" placeholder="ex: Viagem"></div><div><label for="mAlvo">Valor alvo</label><input id="mAlvo" inputmode="decimal" placeholder="0,00"></div></div>
     <button class="btn" data-act="saveM">Criar meta</button>`, !metas.length);

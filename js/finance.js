@@ -33,8 +33,10 @@ export function recInMonth(r,k){
   return {n:null};
 }
 
-// guardado (+) ou retirado (−) das metas no mês k, inclusive de metas arquivadas
-export const guardadoNoMes = k => sum(S.metas.flatMap(m=>m.movs||[]).filter(v=>v.data.slice(0,7)===k));
+// guardado (+) ou retirado (−) no mês k: metas e investimentos, inclusive arquivados. Rendimento não conta (não saiu da sobra).
+export const guardadoNoMes = k => sum([...S.metas.flatMap(m=>m.movs||[]), ...(S.investimentos||[]).flatMap(i=>i.movs).filter(v=>!v.rend)].filter(v=>v.data.slice(0,7)===k));
+// rendimento registrado no mês k (diferença ao atualizar saldos)
+export const rendimentoNoMes = k => sum((S.investimentos||[]).flatMap(i=>i.movs).filter(v=>v.rend && v.data.slice(0,7)===k));
 
 export function calc(k){
   const cashG = S.gastos.filter(g=>g.meio!=='cartao' && g.data.slice(0,7)===k);

@@ -83,7 +83,7 @@ test('migra dados da versão 1 e guarda uma cópia do original', async()=>{
     metas:[{id:'m1', nome:'Reserva', alvo:1000, atual:200}], limites:{mercado:300}};
   const {page, ctx, errors} = await abrir(v1);
   const s = await lerEstado(page);
-  assert.equal(s.v, 3);
+  assert.equal(s.v, 4);
   assert.deepEqual(s.cartoes, [{id:'cartao1', nome:'Meu cartão', fechamento:3, vencimento:10, cor:'brasa'}], 'cartão vem do config antigo');
   assert.equal(s.config.fechamento, undefined);
   assert.equal(s.gastos[0].cartao, undefined, 'pix não tem cartão');
@@ -655,5 +655,53 @@ test('fatura paga: marcar e desmarcar no cartão', async()=>{
   await page.click('[data-act="pagaFat"]');
   assert.equal((await lerEstado(page)).cartoes[0].pagas, undefined);
   assert.match(await page.textContent('.ccard'), /A pagar até/);
+  await ctx.close();
+});
+
+test('investimentos: adicionar, aplicar, resgatar e atualizar saldo', async()=>{
+  const {page, ctx, errors} = await abrir(estado());   // renda 1000
+  await aba(page,'metas');
+  // já estava guardado: não mexe na sobra
+  await page.fill('#iNome','CDB Banco'); await page.click('[data-act="invTipo"][data-v="cdb"]'); await page.fill('#iSaldo','5000');
+  await page.click('[data-act="saveInv"]');
+  let s = await lerEstado(page);
+  assert.equal(s.investimentos[0].saldo, 5000);
+  assert.equal(s.investimentos[0].tipo, 'cdb');
+  assert.equal((await calc(page, ym(0))).sobra, 1000);
+  assert.match(await page.textContent('.inv-hero'), /Total investido/);
+  // aplicar sai da sobra
+  await page.click('[data-act="invEd"]');
+  await page.click('[data-act="invMov"][data-s="1"]'); await page.fill('#dlg-v','300'); await page.click('[data-dlg="ok"]');
+  assert.equal((await lerEstado(page)).investimentos[0].saldo, 5300);
+  assert.equal((await calc(page, ym(0))).sobra, 700);
+  // resgatar mais que o saldo é recusado; resgatar volta para a sobra
+  await page.click('[data-act="invMov"][data-s="-1"]'); await page.fill('#dlg-v','9000'); await page.click('[data-dlg="ok"]');
+  assert.match(await page.textContent('.dlg-erro'), /saldo/);
+  await page.fill('#dlg-v','100'); await page.click('[data-dlg="ok"]');
+  assert.equal((await calc(page, ym(0))).sobra, 800);
+  // atualizar saldo: rendimento não mexe na sobra
+  await page.click('[data-act="invSaldo"]'); await page.fill('#dlg-v','5250,50'); await page.click('[data-dlg="ok"]');
+  s = await lerEstado(page);
+  assert.equal(s.investimentos[0].saldo, 5250.5);
+  assert.equal(s.investimentos[0].movs.at(-1).rend, true);
+  assert.equal((await calc(page, ym(0))).sobra, 800);
+  assert.match(await page.textContent('.inv-hero'), /de rendimento este mês/);
+  // aplicando agora: sai da sobra
+  await secao(page,'novoInv');
+  await page.fill('#iNome','Ações X'); await page.click('[data-act="invTipo"][data-v="acoes"]'); await page.fill('#iSaldo','200');
+  await page.click('[data-act="invJa"][data-v="0"]');
+  assert.equal(await page.inputValue('#iNome'), 'Ações X', 'escolher opção não apaga o que foi digitado');
+  await page.click('[data-act="saveInv"]');
+  assert.equal((await calc(page, ym(0))).sobra, 600);
+  assert.match(await page.textContent('.inv-hero'), /renda variável/);
+  // remover e desfazer
+  await page.click('[data-act="invEd"]'); await page.click('[data-act="invArq"]');
+  assert.equal((await lerEstado(page)).investimentos[0].arquivado, true);
+  assert.equal((await calc(page, ym(0))).sobra, 600, 'removido continua contando no mês');
+  await page.click('#toast button');
+  assert.equal((await lerEstado(page)).investimentos[0].arquivado, undefined);
+  // backup de versão mais nova é recusado por versões antigas: o arquivo sai com v4
+  assert.equal((await lerEstado(page)).v, 4);
+  assert.deepEqual(errors, []);
   await ctx.close();
 });

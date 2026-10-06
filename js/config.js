@@ -28,6 +28,22 @@ export const RULES = [
   [/MERCADOLIVRE|MERCADO LIVRE|SHOPEE|AMAZON|MAGAZINE|SHEIN|ALIEXPRESS|AMERICANAS/i,'compras']
 ];
 
+// tipos de investimento; `fixa` separa renda fixa de renda variável no resumo
+export const TIPOS_INV = [
+  {id:'cdb',       n:'CDB',                 c:'#5ab0ff', fixa:true},
+  {id:'lci',       n:'LCI / LCA',           c:'#5fd4b4', fixa:true},
+  {id:'tesouro',   n:'Tesouro Direto',      c:'#ffb547', fixa:true},
+  {id:'poupanca',  n:'Poupança',            c:'#d4f25a', fixa:true},
+  {id:'rf',        n:'Outra renda fixa',    c:'#8ecae6', fixa:true},
+  {id:'acoes',     n:'Ações',               c:'#ff7a6b', fixa:false},
+  {id:'fii',       n:'Fundos imobiliários', c:'#c3b1ff', fixa:false},
+  {id:'fundos',    n:'Fundos',              c:'#f472b6', fixa:false},
+  {id:'cripto',    n:'Cripto',              c:'#f59e0b', fixa:false},
+  {id:'previdencia', n:'Previdência',       c:'#94a3b8', fixa:true},
+  {id:'outros',    n:'Outros',              c:'#64748b', fixa:false}
+];
+export const tipoInv = id => TIPOS_INV.find(t=>t.id===id) || TIPOS_INV[TIPOS_INV.length-1];
+
 // degradês disponíveis para os cartões (classes .cc-* no CSS)
 export const CORES_CARTAO = ['brasa','lilas','lima','oceano','grafite'];
 

@@ -1,16 +1,17 @@
 // Formato dos dados, migração de versões antigas e validação de backups.
-import { CATS, MEIOS, CORES_CARTAO } from './config.js';
+import { CATS, MEIOS, CORES_CARTAO, TIPOS_INV } from './config.js';
 import { round2 } from './util.js';
 
-export const VERSAO_DADOS = 3;
+export const VERSAO_DADOS = 4;
 // v2: categorias editáveis (cats), entradas, fim/reajuste de fixos, movimentos das metas, data do último backup
+// v4: investimentos (saldo por aplicação; aplicações e resgates contam na sobra do mês, rendimentos não)
 // v3: vários cartões (cartoes), cada um com fechamento e vencimento; gastos e fixos no cartão apontam para um deles
 
 const cartaoPadrao = (fechamento=1, vencimento=10) => ({id:'cartao1', nome:'Meu cartão', fechamento, vencimento, cor:CORES_CARTAO[0]});
 
 export function empty(){
   return {v:VERSAO_DADOS, config:{renda:0, configurado:false, ultimoBackup:null}, cartoes:[cartaoPadrao()],
-    cats:CATS.map(c=>({...c})), gastos:[], entradas:[], recorrentes:[], metas:[], limites:{}};
+    cats:CATS.map(c=>({...c})), gastos:[], entradas:[], recorrentes:[], metas:[], investimentos:[], limites:{}};
 }
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/, YM = /^\d{4}-\d{2}$/, ID = /^[A-Za-z0-9_-]{1,40}$/, COR = /^#[0-9a-f]{6}$/i;
@@ -64,8 +65,13 @@ export function normalize(d){
     .map(x=>{ const m = {id:x.id, nome:str(x.nome), alvo:round2(Math.max(0,x.alvo)), atual:round2(Math.max(0,x.atual)),
       movs:keep(x.movs, v=>ISO.test(v.data) && num(v.valor)).map(v=>({data:v.data, valor:round2(v.valor)}))};
       if(x.arquivada) m.arquivada = true; return m; });
+  const tipos = new Set(TIPOS_INV.map(t=>t.id));
+  const investimentos = keep(d.investimentos, x=>ID.test(x.id) && typeof x.nome==='string' && x.nome.trim() && num(x.saldo))
+    .map(x=>{ const v = {id:x.id, nome:str(x.nome,60), tipo: tipos.has(x.tipo) ? x.tipo : 'outros', saldo:round2(Math.max(0,x.saldo)),
+      movs:keep(x.movs, m=>ISO.test(m.data) && num(m.valor)).map(m=>{ const o = {data:m.data, valor:round2(m.valor)}; if(m.rend) o.rend = true; return o; })};
+      if(x.arquivado) v.arquivado = true; return v; });
   const limites = {};
   for(const [k,v] of Object.entries(d.limites && typeof d.limites==='object' ? d.limites : {})){ const n = Number(v); if(catIds.has(k) && num(n) && n>0) limites[k] = round2(n); }
 
-  return {state:{v:VERSAO_DADOS, config, cartoes, cats, gastos, entradas, recorrentes, metas, limites}, ignorados};
+  return {state:{v:VERSAO_DADOS, config, cartoes, cats, gastos, entradas, recorrentes, metas, investimentos, limites}, ignorados};
 }
