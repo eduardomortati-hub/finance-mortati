@@ -1,0 +1,13 @@
+# Nada pessoal vai para o repositório público
+CONTEXTO-APP.md
+meu-caixa.html
+meu-caixa-backup-*.json
+*.backup.json
+*.csv
+*.ofx
+*.xls
+*.xlsx
+
+node_modules/
+.DS_Store
+Thumbs.db
