@@ -590,3 +590,70 @@ test('Início limpo: detalhes e seções começam fechados e abrem com um toque'
   assert.ok(await page.isVisible('[data-fold="cats"] .cat'));
   await ctx.close();
 });
+
+test('quanto dá para gastar por dia, só no mês atual', async()=>{
+  const {page, ctx} = await abrir(estado());   // renda de 1000 e nenhum gasto
+  const dias = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate() - now.getDate() + 1;
+  const txt = (await page.textContent('.pordia')).replace(/\s/g,' ');
+  assert.ok(txt.includes(brl(1000/dias).replace(/\s/g,' ')), txt);
+  await page.click('[data-act="mes"][data-d="-1"]');
+  assert.equal(await page.$('.pordia'), null);
+  await ctx.close();
+});
+
+test('categoria automática pelo nome do que comprou; escolha manual vence', async()=>{
+  const {page, ctx} = await abrir(estado({gastos:[{id:'g1', data:iso(-3), valor:30, cat:'saude', meio:'pix', desc:'Loja do Zé', criado:1}]}));
+  await aba(page,'lancar');
+  const marcada = id => page.getAttribute(`[data-act="dCat"][data-id="${id}"]`, 'aria-pressed');
+  await page.fill('#gDesc','loja do ze');
+  assert.equal(await marcada('saude'), 'true', 'pelo histórico (sem acento e maiúscula)');
+  await page.fill('#gDesc','iFood');
+  assert.equal(await marcada('delivery'), 'true', 'pelas regras de nomes conhecidos');
+  await page.click('[data-act="dCat"][data-id="mercado"]');
+  await page.fill('#gDesc','Loja do Zé');
+  assert.equal(await marcada('mercado'), 'true', 'depois de escolher na mão, não troca');
+  await page.fill('#gValor','10'); await page.click('[data-act="saveG"]');
+  const s = await lerEstado(page);
+  assert.equal(s.gastos.find(g=>g.id!=='g1').cat, 'mercado');
+  await ctx.close();
+});
+
+test('apagar lançamento: some na hora e dá para desfazer', async()=>{
+  const {page, ctx} = await abrir(estado({gastos:[{id:'g1', data:iso(0), valor:42, cat:'mercado', meio:'pix', desc:'feira', criado:1}]}));
+  await page.click('[data-act="delL"][data-id="g1"]');
+  assert.equal((await lerEstado(page)).gastos.length, 0);
+  assert.match(await toastTxt(page), /Gasto apagado/);
+  await page.click('#toast button');
+  assert.equal((await lerEstado(page)).gastos.length, 1);
+  assert.match(await page.textContent('#lista'), /feira/);
+  await ctx.close();
+});
+
+test('olho esconde os valores e lembra a escolha', async()=>{
+  const {page, ctx} = await abrir(estado({gastos:[{id:'g1', data:iso(0), valor:42.5, cat:'mercado', meio:'pix', desc:'feira', criado:1}]}));
+  await page.click('[data-act="olho"]');
+  assert.equal(await page.$eval('.hero', d=>d.open), false, 'tocar no olho não abre os detalhes');
+  assert.match(await page.textContent('.big'), /•••/);
+  assert.doesNotMatch(await page.textContent('#view'), /\d,\d\d/, 'nenhum valor à mostra');
+  await page.reload(); await page.waitForSelector('#view .card');
+  assert.match(await page.textContent('.big'), /•••/, 'continua escondido ao reabrir');
+  await page.click('[data-act="olho"]');
+  assert.match(await page.textContent('#lista'), /42,50/);
+  await ctx.close();
+});
+
+test('fatura paga: marcar e desmarcar no cartão', async()=>{
+  // fecha dia 1 e vence no último dia do mês: sempre há uma fatura fechada para pagar neste mês
+  const {page, ctx} = await abrir(estado({cartoes:[{id:'k1', nome:'Nubank', fechamento:1, vencimento:31}],
+    gastos:[{id:'g1', data:ym(-1)+'-15', valor:120, cat:'mercado', meio:'cartao', cartao:'k1', desc:'', criado:1}]}));
+  assert.match(await page.textContent('.ccard'), /A pagar até/);
+  await page.click('[data-act="pagaFat"]');
+  assert.deepEqual((await lerEstado(page)).cartoes[0].pagas, [ym(0)]);
+  assert.doesNotMatch(await page.textContent('.ccard'), /A pagar até/);
+  assert.match(await page.textContent('[data-act="pagaFat"]'), /paga · desfazer/);
+  assert.match(await page.textContent('.hero .det'), /paga/);
+  await page.click('[data-act="pagaFat"]');
+  assert.equal((await lerEstado(page)).cartoes[0].pagas, undefined);
+  assert.match(await page.textContent('.ccard'), /A pagar até/);
+  await ctx.close();
+});

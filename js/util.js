@@ -1,7 +1,16 @@
 export const $ = s => document.querySelector(s);
 export const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
 export const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-export const fmt = v => (Number(v)||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+export const fmtReal = v => (Number(v)||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+// modo discreto (botão de olho): os valores aparecem como "R$ •••"; a escolha fica só neste aparelho
+const KEY_DISCRETO = 'meucaixa.discreto';
+export const discreto = {on: (()=>{ try{ return localStorage.getItem(KEY_DISCRETO)==='1'; }catch(e){ return false; } })()};
+export function setDiscreto(on){
+  discreto.on = on;
+  document.documentElement.classList.toggle('discreto', on);
+  try{ if(on) localStorage.setItem(KEY_DISCRETO,'1'); else localStorage.removeItem(KEY_DISCRETO); }catch(e){}
+}
+export const fmt = v => discreto.on ? 'R$ •••' : fmtReal(v);
 export const round2 = v => Math.round((Number(v)||0)*100)/100;
 export function parseNum(s){
   s = String(s ?? '').trim().replace(/R\$|\s/g,'');
@@ -18,7 +27,13 @@ export function mLabel(k,short){ const [y,m]=k.split('-').map(Number); return ne
 export function dLabel(iso){ const [y,m,d]=iso.split('-'); return d+'/'+m; }
 export const sum = (arr,f=x=>x.valor) => arr.reduce((a,x)=>a+(Number(f(x))||0),0);
 
-export function toast(t){ const el=$('#toast'); el.textContent=t; el.classList.add('show'); clearTimeout(toast._t); toast._t=setTimeout(()=>el.classList.remove('show'),2400); }
+// aviso rápido; com `acao` ({rotulo, fn}) mostra um botão (ex.: Desfazer) e fica mais tempo na tela
+export function toast(t, acao){
+  const el = $('#toast'); el.textContent = t;
+  if(acao){ const b = document.createElement('button'); b.textContent = acao.rotulo; b.onclick = ()=>{ el.classList.remove('show'); acao.fn(); }; el.append(b); }
+  el.classList.toggle('com-acao', !!acao);
+  el.classList.add('show'); clearTimeout(toast._t); toast._t = setTimeout(()=>el.classList.remove('show'), acao ? 5000 : 2400);
+}
 
 // texto sem acentos e minúsculo, para busca
 export const normTxt = s => String(s ?? '').normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase();

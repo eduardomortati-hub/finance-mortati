@@ -1,8 +1,8 @@
 import { save, loadError } from './store.js';
-import { ui, render, renderLista, totalParcelado, sugestoesCat } from './views.js';
+import { ui, render, renderLista, totalParcelado, sugestoesCat, catPeloNome } from './views.js';
 import { A } from './actions.js';
 import { initImports } from './import.js';
-import { $, toast } from './util.js';
+import { $, toast, discreto, setDiscreto } from './util.js';
 
 document.addEventListener('click', e=>{ const b=e.target.closest('[data-act]'); if(!b) return; e.preventDefault(); const f=A[b.dataset.act]; if(f) f(b.dataset,b); });
 document.addEventListener('keydown', e=>{
@@ -13,6 +13,7 @@ document.addEventListener('keydown', e=>{
 document.addEventListener('input', e=>{
   if(e.target.id==='gValor' || e.target.id==='gParc') return totalParcelado();
   if(e.target.id==='nCat') return sugestoesCat();
+  if(e.target.id==='gDesc') return catPeloNome();
   const f = e.target.dataset?.filtro; if(!f) return; ui.busca[f] = e.target.value; renderLista();
 });
 // caixa de sugestões de categoria: abre ao tocar no campo e fecha ao sair dele
@@ -24,6 +25,7 @@ document.addEventListener('toggle', e=>{ const id = e.target.dataset?.fold; if(!
 // sem zoom de pinça (o Safari do iPhone ignora user-scalable=no)
 for(const t of ['gesturestart','gesturechange']) document.addEventListener(t, e=>e.preventDefault(), {passive:false});
 document.addEventListener('touchmove', e=>{ if(e.touches.length>1) e.preventDefault(); }, {passive:false});
+setDiscreto(discreto.on);
 initImports();
 save();
 render();

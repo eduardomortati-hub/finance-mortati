@@ -1,7 +1,7 @@
-import { CATS, MEIOS, CORES_CARTAO, meioOf } from './config.js';
+import { CATS, MEIOS, RULES, CORES_CARTAO, meioOf } from './config.js';
 import { S, catOf, catsAtivas, cartaoOf, cartoesAtivos } from './store.js';
 import { calc, recInMonth, faturaPeriodo, vencimentoData, infoCartao } from './finance.js';
-import { $, esc, fmt, todayISO, thisMonth, addM, diffM, mLabel, dLabel, sum, normTxt, diasEntre, addDias, valIn, parseNum } from './util.js';
+import { $, esc, fmt, todayISO, thisMonth, addM, diffM, mLabel, dLabel, sum, normTxt, diasEntre, addDias, valIn, parseNum, fmtReal, discreto } from './util.js';
 
 // estado da interface (não é salvo)
 export const ui = {tab:'inicio', mes:thisMonth(), draft:{tipo:'gasto', cat:null, meio:'cartao', parcelado:false},
@@ -57,6 +57,8 @@ export const valorHTML = v => { const s = fmt(v), i = s.lastIndexOf(','); return
 const inicial = s => esc((String(s).trim()[0] || '?').toUpperCase());
 const corCartao = k => 'cc-' + (CORES_CARTAO.includes(k.cor) ? k.cor : CORES_CARTAO[0]);
 const secH = (titulo, lado='', id='') => `<div class="sec-h"><h2${id?` id="${id}"`:''}>${titulo}</h2><span class="sm">${lado}</span></div>`;
+const OLHO = '<svg viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+const OLHO_X = '<svg viewBox="0 0 24 24"><path d="M3.5 3.5l17 17M10.6 5.6A9.6 9.6 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a17 17 0 0 1-3 3.7M6.6 6.7C4 8.4 2.5 12 2.5 12S6 18.5 12 18.5c1.8 0 3.3-.5 4.6-1.2M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>';
 const BUSCA = '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>';
 
 // sobra do mês: número grande + barra mostrando para onde vai o que entra; o resto abre em "Detalhes"
@@ -71,16 +73,21 @@ function vHero(c){
   ];
   const base = Math.max(1, sum(partes, p=>p[1]));
   const sub = receita ? `de ${fmt(receita)} que entram no mês` : 'Lance suas entradas no + ou defina sua renda em Ajustes';
+  // no mês atual: a sobra dividida pelos dias que faltam (contando hoje)
+  const hoje = todayISO(), [ano, mes] = ui.mes.split('-').map(Number);
+  const diasRest = new Date(ano, mes, 0).getDate() - Number(hoje.slice(8)) + 1;
+  const porDia = ui.mes===thisMonth() && c.sobra>0 ? `<div class="pordia">Dá para gastar <b>${fmt(c.sobra/diasRest)}</b> por dia até o fim do mês</div>` : '';
   // faturas que vencem no mês escolhido, por cartão
   const faturas = c.porCartao.filter(x=>!x.cartao.arquivado || x.total);
   const linhas = faturas.map(x=>{
     const p = faturaPeriodo(ui.mes, x.cartao);
-    return `<div class="row"><div class="lanc"><span class="ico ${corCartao(x.cartao)}">${inicial(x.cartao.nome)}</span><div class="t"><div>${esc(x.cartao.nome)}</div><small>vence ${dLabel(vencimentoData(ui.mes, x.cartao))}, compras de ${dLabel(p.ini)} a ${dLabel(p.fim)}</small></div></div><b>${fmt(x.total)}</b></div>`;
+    return `<div class="row"><div class="lanc"><span class="ico ${corCartao(x.cartao)}">${inicial(x.cartao.nome)}</span><div class="t"><div>${esc(x.cartao.nome)}${(x.cartao.pagas||[]).includes(ui.mes) ? '<span class="tag pos">paga</span>' : ''}</div><small>vence ${dLabel(vencimentoData(ui.mes, x.cartao))}, compras de ${dLabel(p.ini)} a ${dLabel(p.fim)}</small></div></div><b>${fmt(x.total)}</b></div>`;
   }).join('');
   return `<details class="card hero" data-fold="hero" ${ui.abertos.has('hero')?'open':''}><summary>
-    <div class="lbl">${c.sobra>=0 ? 'Sobra prevista' : 'Vai faltar'}</div>
+    <div class="hero-top"><div class="lbl">${c.sobra>=0 ? 'Sobra prevista' : 'Vai faltar'}</div><button class="olho" data-act="olho" aria-pressed="${discreto.on}" aria-label="${discreto.on ? 'Mostrar valores' : 'Esconder valores'}">${discreto.on ? OLHO_X : OLHO}</button></div>
     <div class="big ${c.sobra>=0?'':'neg'}">${valorHTML(c.sobra)}</div>
     <div class="sub">${sub}</div>
+    ${porDia}
     <div class="stack" aria-hidden="true">${partes.filter(p=>p[1]>0).map(p=>`<i style="flex:${p[1]/base};background:${p[2]}"></i>`).join('')}</div>
     <div class="mais">Detalhes</div></summary>
     <div class="det">
@@ -98,7 +105,8 @@ function vHero(c){
 function vCarteira(){
   const hoje = todayISO(), ativos = cartoesAtivos();
   const cols = ativos.map(k=>{
-    const i = infoCartao(k, hoje), fechada = i.prox!==i.aberta;
+    const i = infoCartao(k, hoje), temFechada = i.prox!==i.aberta, paga = (k.pagas||[]).includes(i.prox);
+    const fechada = temFechada && !paga;   // fatura fechada esperando pagamento; depois de paga, o cartão mostra a fatura atual
     const topo = fechada
       ? `<small>A pagar até ${dLabel(i.proxVence)}, ${emDias(i.diasProx)}</small><b>${valorHTML(i.valorProx)}</b>`
       : `<small>Fatura atual, vence ${dLabel(i.pagaHoje)}</small><b>${valorHTML(i.valorAberta)}</b>`;
@@ -115,6 +123,7 @@ function vCarteira(){
         <div class="bottom">${rodape}</div>
       </div>
       <p class="cc-dica">${dica}</p>
+      ${temFechada && i.valorProx>0 ? `<button class="cc-paga ${paga?'on':''}" data-act="pagaFat" data-id="${esc(k.id)}" data-m="${i.prox}" aria-pressed="${paga}">${paga ? `✓ Fatura de ${mLabel(i.prox,true)} paga · desfazer` : `Marcar fatura de ${mLabel(i.prox,true)} como paga`}</button>` : ''}
     </div>`;
   });
   return secH(ativos.length>1 ? 'Seus cartões' : 'Seu cartão', ativos.length>1 ? 'deslize →' : '')
@@ -269,7 +278,21 @@ function vLancar(){
 export function totalParcelado(){
   const el = $('#gTotal'); if(!el) return;
   const v = parseNum($('#gValor').value), n = parseInt($('#gParc').value, 10);
-  el.innerHTML = v>0 && n>=2 ? `${n}x de ${esc(fmt(v))} = <b>${esc(fmt(v*n))}</b> no total` : 'Digite o valor de cada parcela e quantas vezes.';
+  el.innerHTML = v>0 && n>=2 ? `${n}x de ${esc(fmtReal(v))} = <b>${esc(fmtReal(v*n))}</b> no total` : 'Digite o valor de cada parcela e quantas vezes.';
+}
+
+// categoria automática pelo nome: a do último gasto com o mesmo nome; sem histórico, as regras da importação (iFood, posto…).
+// Se a pessoa já escolheu a categoria na mão, não mexe.
+export function catPeloNome(){
+  const d = ui.draft, inp = $('#gDesc');
+  if(!inp || ui.editG || d.tipo!=='gasto' || d.catManual) return;
+  const txt = inp.value.trim(), q = normTxt(txt); if(q.length<2) return;
+  const visivel = id => S.cats.some(c=>c.id===id && !c.oculta);
+  const g = S.gastos.filter(g=>normTxt(g.desc.trim())===q && visivel(g.cat)).sort((a,b)=>b.criado-a.criado || b.data.localeCompare(a.data))[0];
+  const cat = g?.cat || RULES.find(([re,c])=>re.test(txt) && visivel(c))?.[1];
+  if(!cat || cat===d.cat) return;
+  d.cat = cat;
+  document.querySelectorAll('[data-act="dCat"]').forEach(b=>{ const on = b.dataset.id===cat; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
 }
 
 /* ---------- Fixos ---------- */

@@ -5,7 +5,7 @@ import { ui, render, totalParcelado } from './views.js';
 import { ask } from './modal.js';
 import { cifrar } from './crypto.js';
 import { CATS, CORES_CARTAO } from './config.js';
-import { $, uid, fmt, round2, parseNum, todayISO, thisMonth, addM, diffM, mLabel, valIn, toast } from './util.js';
+import { $, uid, fmt, fmtReal, discreto, setDiscreto, round2, parseNum, todayISO, thisMonth, addM, diffM, mLabel, valIn, toast } from './util.js';
 
 function download(texto, nome){
   const blob = new Blob([texto], {type:'application/json'});
@@ -35,7 +35,15 @@ export const A = {
   },
   dTipo(d){ ui.draft.tipo=d.v; keepDraft(); },
   novo(d){ ui.draft.tipo=d.v; ui.editG=null; ui.tab='lancar'; render(); },
-  dCat(d){ ui.draft.cat=d.id; keepDraft(); },
+  dCat(d){ ui.draft.cat=d.id; ui.draft.catManual=true; keepDraft(); },
+  olho(){ setDiscreto(!discreto.on); render(); },
+  pagaFat(d){
+    const k = S.cartoes.find(x=>x.id===d.id); if(!k || !/^\d{4}-\d{2}$/.test(d.m)) return;
+    const pagas = new Set(k.pagas||[]), era = pagas.has(d.m);
+    if(era) pagas.delete(d.m); else pagas.add(d.m);
+    if(pagas.size) k.pagas = [...pagas].sort().slice(-24); else delete k.pagas;
+    save(); toast(era ? 'Fatura volta a ficar em aberto' : 'Fatura marcada como paga ✓'); render();
+  },
   dMeio(d){ ui.draft.meio=d.id; if(d.id!=='cartao') ui.draft.parcelado=false; keepDraft(); },
   dParc(d){ ui.draft.parcelado = d.v==='1'; keepDraft(); },
   dCartao(d){ ui.draft.cartao=d.id; keepDraft(); },
@@ -63,14 +71,14 @@ export const A = {
       if(!(n>=2)) return toast('Informe o número de parcelas');
       // o valor digitado é o de cada parcela
       S.recorrentes.push({id:uid(), nome:desc||catOf(d.cat).n, valor:round2(v), tipo:'parcela', parcelas:n, meio:'cartao', cartao:d.cartao, inicio:faturaMonth(data, cartaoOf(d.cartao)), cat:d.cat});
-      save(); toast(`${n}x de ${fmt(v)} (total ${fmt(v*n)}) — está em Fixos`);
+      save(); toast(`${n}x de ${fmtReal(v)} (total ${fmtReal(v*n)}) — está em Fixos`);
     } else {
       const g = {id:uid(), data, valor:round2(v), cat:d.cat, meio:d.meio, desc, criado:Date.now()};
       if(d.meio==='cartao') g.cartao = d.cartao;
       S.gastos.push(g);
       save(); toast('Gasto salvo ✓');
     }
-    d.parcelado = false;
+    d.parcelado = false; d.catManual = false;
     render();
   },
   editL(d){
@@ -80,10 +88,16 @@ export const A = {
     ui.tab = 'lancar'; render();
   },
   cancelG(){ ui.editG=null; ui.tab='inicio'; render(); },
+  // apaga na hora; o aviso traz "Desfazer" por alguns segundos
   delL(d){
-    if(!confirm(d.k==='gasto' ? 'Apagar este gasto?' : 'Apagar esta entrada?')) return;
-    if(d.k==='gasto') S.gastos = S.gastos.filter(g=>g.id!==d.id); else S.entradas = S.entradas.filter(e=>e.id!==d.id);
+    const lista = d.k==='gasto' ? S.gastos : S.entradas, i = lista.findIndex(x=>x.id===d.id); if(i<0) return;
+    const [x] = lista.splice(i, 1);
     save(); render();
+    toast(d.k==='gasto' ? 'Gasto apagado' : 'Entrada apagada', {rotulo:'Desfazer', fn:()=>{
+      const l = d.k==='gasto' ? S.gastos : S.entradas;
+      if(!l.some(y=>y.id===x.id)) l.splice(Math.min(i, l.length), 0, x);
+      save(); render(); toast('Voltou ✓');
+    }});
   },
   repG(d){
     const g = S.gastos.find(x=>x.id===d.id); if(!g) return;

@@ -36,7 +36,10 @@ export function normalize(d){
     ? keep(d.cartoes, x=>ID.test(x.id) && typeof x.nome==='string' && x.nome.trim()).map((x,i)=>{
         const k = {id:x.id, nome:str(x.nome,40), fechamento:int(x.fechamento,1,1,31), vencimento:int(x.vencimento,10,1,31),
           cor: CORES_CARTAO.includes(x.cor) ? x.cor : CORES_CARTAO[i % CORES_CARTAO.length]};
-        if(x.arquivado) k.arquivado = true; return k; })
+        if(x.arquivado) k.arquivado = true;
+        const pagas = Array.isArray(x.pagas) ? x.pagas.filter(m=>typeof m==='string' && YM.test(m)).slice(-24) : [];
+        if(pagas.length) k.pagas = pagas;   // meses de vencimento das faturas marcadas como pagas
+        return k; })
     : [cartaoPadrao(int(c.fechamento,1,1,31), int(c.vencimento,10,1,31))];
   if(!cartoes.length) cartoes.push(cartaoPadrao());
   if(!cartoes.some(k=>!k.arquivado)) delete cartoes[0].arquivado;   // sempre ao menos um cartão ativo
