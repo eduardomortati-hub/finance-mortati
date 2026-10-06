@@ -5,7 +5,6 @@ const VERSION = 'v1';
 const CACHE = 'meucaixa-' + VERSION;
 const FILES = [
   './',
-  './index.html',
   './manifest.webmanifest',
   './css/style.css',
   './js/app.js',
@@ -41,8 +40,10 @@ self.addEventListener('message', e=>{ if(e.data==='skipWaiting') self.skipWaitin
 self.addEventListener('fetch', e=>{
   const req = e.request;
   if(req.method!=='GET' || new URL(req.url).origin!==location.origin) return;
+  // toda navegação abre a página do app guardada em './'
+  // (não usa './index.html': alguns servidores redirecionam esse endereço, e o navegador recusa resposta redirecionada em navegação)
   if(req.mode==='navigate'){
-    e.respondWith(caches.match('./index.html').then(r=>r || fetch(req)));
+    e.respondWith(caches.match('./').then(r=>r && !r.redirected ? r : fetch(req)));
     return;
   }
   e.respondWith(caches.match(req, {ignoreSearch:true}).then(r=>r || fetch(req)));

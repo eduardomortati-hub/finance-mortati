@@ -15,12 +15,13 @@ navigator.storage?.persist?.().catch(()=>{});
 
 /* ---------- PWA: offline + aviso de nova versão ---------- */
 if('serviceWorker' in navigator){
-  let reloading = false;
-  navigator.serviceWorker.addEventListener('controllerchange', ()=>{ if(reloading) return; reloading = true; location.reload(); });
+  // recarrega só quando a pessoa tocou em "Atualizar" (na primeira instalação o SW também assume a página, sem precisar recarregar)
+  let updating = false;
+  navigator.serviceWorker.addEventListener('controllerchange', ()=>{ if(!updating) return; updating = false; location.reload(); });
   navigator.serviceWorker.register('./sw.js').then(reg=>{
     const offer = w => {
       $('#upd').hidden = false;
-      $('#updBtn').onclick = () => w.postMessage('skipWaiting');
+      $('#updBtn').onclick = () => { updating = true; w.postMessage('skipWaiting'); };
     };
     if(reg.waiting && navigator.serviceWorker.controller) offer(reg.waiting);
     reg.addEventListener('updatefound', ()=>{
