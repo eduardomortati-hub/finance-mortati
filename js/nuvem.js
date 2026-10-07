@@ -126,7 +126,7 @@ async function gravar(base){
 function mesclar(nuvem, aqui){
   const porId = (a=[], b=[]) => { const m = new Map(a.map(x=>[x.id, x])); b.forEach(x=>m.set(x.id, x)); return [...m.values()]; };
   const out = {...nuvem, ...aqui, limites:{...nuvem.limites, ...aqui.limites}};
-  for(const k of ['gastos','entradas','recorrentes','metas','investimentos','cartoes','cats']) out[k] = porId(nuvem[k], aqui[k]);
+  for(const k of ['gastos','entradas','recorrentes','metas','investimentos','contas','cartoes','cats']) out[k] = porId(nuvem[k], aqui[k]);
   return normalize(out).state;
 }
 

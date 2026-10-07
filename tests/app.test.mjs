@@ -130,7 +130,7 @@ test('migra dados da versão 1 e guarda uma cópia do original', async()=>{
     metas:[{id:'m1', nome:'Reserva', alvo:1000, atual:200}], limites:{mercado:300}};
   const {page, ctx, errors} = await abrir(v1);
   const s = await lerEstado(page);
-  assert.equal(s.v, 4);
+  assert.equal(s.v, 5);
   assert.deepEqual(s.cartoes, [{id:'cartao1', nome:'Meu cartão', fechamento:3, vencimento:10, cor:'brasa'}], 'cartão vem do config antigo');
   assert.equal(s.config.fechamento, undefined);
   assert.equal(s.gastos[0].cartao, undefined, 'pix não tem cartão');
@@ -748,7 +748,7 @@ test('investimentos: adicionar, aplicar, resgatar e atualizar saldo', async()=>{
   await page.click('#toast button');
   assert.equal((await lerEstado(page)).investimentos[0].arquivado, undefined);
   // backup de versão mais nova é recusado por versões antigas: o arquivo sai com v4
-  assert.equal((await lerEstado(page)).v, 4);
+  assert.equal((await lerEstado(page)).v, 5);
   assert.deepEqual(errors, []);
   await ctx.close();
 });
@@ -875,5 +875,54 @@ test('faixa de meses no Início: mostra a sobra de cada mês e troca o mês ao t
   assert.equal(await page.getAttribute(`.mes-chip[data-m="${ym(-1)}"]`, 'aria-pressed'), 'true');
   assert.match(await page.textContent('.big'), /300/);
   assert.match(await page.textContent('#lista'), /x/);
+  await ctx.close();
+});
+
+test('contas: saldo atualiza sozinho com pix, entradas, renda, fixos e fatura paga', async()=>{
+  const ontem = iso(-1), pd = ym(-1)+'-01';
+  const {page, ctx, errors} = await abrir(estado({config:{renda:1000, configurado:true, ultimoBackup:iso(0), diaRenda:1},
+    cartoes:[{id:'k1', nome:'Nubank', fechamento:1, vencimento:31}],
+    // saldo informado no dia 1 do mês passado: a renda daquele dia já estava no saldo; a deste mês (dia 1) entra sozinha
+    contas:[{id:'c1', nome:'Conta A', saldo:2000, desde:pd, desdeTs:Date.now()}],
+    gastos:[{id:'g0', data:ym(-1)+'-15', valor:300, cat:'mercado', meio:'cartao', cartao:'k1', desc:'compra cartão', criado:1}],
+    recorrentes:[{id:'r1', nome:'Aluguel', valor:500, tipo:'fixo', meio:'pix', inicio:ym(-1), cat:'outros', dia:31}]}));
+  const saldoTela = async () => (await page.textContent('.contas .saldo')).replace(/\s/g,' ');
+  // 2000 + renda deste mês (1000) − aluguel do mês passado (dia 31 → último dia) = 2500
+  assert.equal(await saldoTela(), brl(2500).replace(/\s/g,' '));
+  await aba(page,'lancar'); await page.click('[data-act="dMeio"][data-id="pix"]'); await page.fill('#gValor','100'); await page.click('[data-act="saveG"]');
+  await page.click('[data-act="dTipo"][data-v="entrada"]'); await page.fill('#gValor','40'); await page.click('[data-act="saveG"]');
+  await aba(page,'inicio');
+  assert.equal(await saldoTela(), brl(2440).replace(/\s/g,' '));
+  // fim do mês: − aluguel deste mês (500) − fatura de 300 ainda não paga
+  assert.match((await page.textContent('.contas .fim')).replace(/\s/g,' '), new RegExp(brl(1640).replace(/\s/g,' ').replace(/[.$]/g,'\\$&')));
+  // pagar a fatura desconta do saldo
+  await page.click('[data-act="pagaFat"]');
+  assert.equal(await saldoTela(), brl(2140).replace(/\s/g,' '));
+  assert.equal((await lerEstado(page)).cartoes[0].pagtos[ym(0)].conta, 'c1');
+  // extrato e corrigir saldo
+  await page.click('[data-act="verConta"]'); await page.waitForSelector('#dlg[open]');
+  assert.match(await page.textContent('#dlg'), /Aluguel/);
+  assert.match(await page.textContent('#dlg'), /Fatura Nubank/);
+  await page.click('[data-act="corrigirSaldo"]'); await page.fill('#dlg-v','2000'); await page.click('[data-dlg="ok"]');
+  assert.equal(await saldoTela(), brl(2000).replace(/\s/g,' '));
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('contas: criar em Ajustes e, com duas contas, escolher de qual conta saiu', async()=>{
+  const {page, ctx} = await abrir(estado());
+  await page.click('[data-act="novaConta"]');
+  await page.fill('#cNome','Nubank'); await page.fill('#cSaldo','1000'); await page.click('[data-act="salvarConta"]');
+  await page.click('[data-act="edConta"][data-id="novo"]');
+  await page.fill('#cNome','Itaú'); await page.fill('#cSaldo','500'); await page.click('[data-act="salvarConta"]');
+  const s = await lerEstado(page); const itau = s.contas.find(c=>c.nome==='Itaú');
+  await aba(page,'lancar'); await page.click('[data-act="dMeio"][data-id="pix"]');
+  await page.click(`[data-act="dConta"][data-id="${itau.id}"]`);
+  await page.fill('#gValor','50'); await page.click('[data-act="saveG"]');
+  assert.equal((await lerEstado(page)).gastos[0].conta, itau.id);
+  await aba(page,'inicio');
+  assert.match(await page.textContent('.contas'), /Itaú/);
+  assert.match((await page.textContent('.contas .saldo')).replace(/\s/g,' '), /1\.450,00/);
+  assert.match(await page.textContent('#lista'), /Pix · Itaú/);
   await ctx.close();
 });

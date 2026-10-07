@@ -1,4 +1,4 @@
-import { S, cartaoOf } from './store.js';
+import { S, cartaoOf, catOf } from './store.js';
 import { pad, addM, diffM, sum, todayISO, addDias, diasEntre } from './util.js';
 
 const diasNoMes = k => { const [y,m] = k.split('-').map(Number); return new Date(y, m, 0).getDate(); };
@@ -79,4 +79,47 @@ export function infoCartao(c, hoje = todayISO()){
     pagaHoje, diasHoje:diasEntre(hoje, pagaHoje),
     hojeEhMelhor: periodo.ini===hoje, melhorDia:fechaEm, pagaMelhor, diasMelhor:diasEntre(fechaEm, pagaMelhor)
   };
+}
+
+/* ---------- contas: saldo que o app vai atualizando sozinho ----------
+   A pessoa informa o saldo de cada conta uma vez (saldo + momento em `desde`/`desdeTs`). A partir daí entram sozinhos:
+   gastos no pix/débito/dinheiro e entradas (pela data e hora de criação), a renda fixa no dia em que cai, os fixos fora
+   do cartão no dia do pagamento e as faturas marcadas como pagas. "Corrigir saldo" informa um saldo novo e recomeça a conta. */
+export const contasAtivas = () => (S.contas||[]).filter(c=>!c.arquivada);
+export const contaPadrao = () => contasAtivas()[0] || (S.contas||[])[0] || null;
+const diaDo = (k, d) => k+'-'+pad(Math.min(Number(d)||1, diasNoMes(k)));
+const daConta = (id, c) => ((id && S.contas.some(x=>x.id===id)) ? id : contaPadrao()?.id) === c.id;
+
+// movimentos da conta `c` depois do saldo informado, até `ate` (inclusive), em ordem de data
+export function movimentosConta(c, ate = todayISO()){
+  const out = [];
+  const conta = (data, criado) => (data > c.desde || (data===c.desde && criado!=null && criado > c.desdeTs)) && data <= ate;
+  S.gastos.forEach(g=>{ if(g.meio!=='cartao' && daConta(g.conta, c) && conta(g.data, g.criado)) out.push({data:g.data, valor:-g.valor, desc:g.desc || catOf(g.cat).n, tipo:'gasto', id:g.id}); });
+  S.entradas.forEach(e=>{ if(daConta(e.conta, c) && conta(e.data, e.criado)) out.push({data:e.data, valor:e.valor, desc:e.desc || 'Entrada', tipo:'entrada', id:e.id}); });
+  const renda = Number(S.config.renda)||0;
+  for(let k = c.desde.slice(0,7); k <= ate.slice(0,7); k = addM(k,1)){
+    if(renda && daConta(S.config.contaRenda, c)){ const d = diaDo(k, S.config.diaRenda||5); if(conta(d)) out.push({data:d, valor:renda, desc:'Renda', tipo:'renda'}); }
+    S.recorrentes.forEach(r=>{
+      if(r.meio==='cartao' || !recInMonth(r, k) || !daConta(r.conta, c)) return;
+      const d = diaDo(k, r.dia||10); if(conta(d)) out.push({data:d, valor:-r.valor, desc:r.nome, tipo:'fixo'});
+    });
+  }
+  S.cartoes.forEach(k=>Object.entries(k.pagtos||{}).forEach(([m, p])=>{
+    if(daConta(p.conta, c) && conta(p.data, p.ts)) out.push({data:p.data, valor:-(calc(m).porCartao.find(x=>x.cartao===k)?.total||0), desc:'Fatura '+k.nome, tipo:'fatura'});
+  }));
+  return out.sort((a,b)=>a.data.localeCompare(b.data));
+}
+export const saldoConta = (c, ate = todayISO()) => (Number(c.saldo)||0) + sum(movimentosConta(c, ate), x=>x.valor);
+
+// quanto vai ter nas contas no fim deste mês: o que já está previsto (renda, fixos, lançamentos com data futura)
+// menos as faturas que ainda vão vencer este mês e não foram marcadas como pagas
+export function previsaoFimDoMes(){
+  const hoje = todayISO(), k = hoje.slice(0,7), fim = diaDo(k, 31);
+  let total = sum(contasAtivas(), c=>saldoConta(c, fim));
+  const porCartao = calc(k).porCartao;
+  S.cartoes.forEach(cart=>{
+    if((cart.pagtos||{})[k] || (cart.pagas||[]).includes(k) || vencimentoData(k, cart) < hoje) return;
+    total -= porCartao.find(x=>x.cartao===cart)?.total || 0;
+  });
+  return total;
 }

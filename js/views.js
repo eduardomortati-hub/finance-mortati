@@ -1,12 +1,12 @@
 import { CATS, MEIOS, RULES, CORES_CARTAO, TIPOS_INV, tipoInv, meioOf } from './config.js';
 import { S, catOf, catsAtivas, cartaoOf, cartoesAtivos } from './store.js';
 import { sessao, status as syncStatus, pendente } from './nuvem.js';
-import { calc, recInMonth, faturaMonth, faturaPeriodo, vencimentoData, infoCartao, rendimentoNoMes } from './finance.js';
-import { $, esc, fmt, todayISO, thisMonth, addM, diffM, mLabel, dLabel, sum, normTxt, diasEntre, addDias, valIn, parseNum, fmtReal, discreto } from './util.js';
+import { calc, recInMonth, faturaMonth, faturaPeriodo, vencimentoData, infoCartao, rendimentoNoMes, contasAtivas, contaPadrao, saldoConta, movimentosConta, previsaoFimDoMes } from './finance.js';
+import { $, esc, fmt, todayISO, thisMonth, addM, diffM, mLabel, dLabel, sum, normTxt, diasEntre, addDias, valIn, parseNum, fmtReal, discreto, round2 } from './util.js';
 
 // estado da interface (não é salvo)
 export const ui = {tab:'inicio', mes:thisMonth(), draft:{tipo:'gasto', cat:null, meio:'cartao', parcelado:false},
-  editId:null, editG:null, cartaoEd:null, cartaoCor:null, invEd:null, invNovoTipo:'cdb', invNovoJa:true, busca:{q:'', cat:'', meio:''}, buscaAberta:false,
+  editId:null, editG:null, contaEd:null, cartaoEd:null, cartaoCor:null, invEd:null, invNovoTipo:'cdb', invNovoJa:true, busca:{q:'', cat:'', meio:''}, buscaAberta:false,
   abertos:new Set(), tela:null, authMsg:''};   // tela: entrar | criar | esqueci | novaSenha | aviso (antes de entrar no app)   // seções recolhíveis que a pessoa abriu (data-fold)
 
 const ymBR = k => mLabel(k,true)+'/'+k.slice(2,4);
@@ -17,13 +17,14 @@ const banner = t => `<div class="banner" style="margin-bottom:12px">${t}</div>`;
 const fold = (id, titulo, lado, corpo, abrir=false) => `<details class="card fold" data-fold="${id}" ${abrir || ui.abertos.has(id) ? 'open' : ''}><summary><span>${titulo}</span>${lado ? `<span class="sm">${lado}</span>` : ''}</summary><div class="fold-c">${corpo}</div></details>`;
 const emDias = n => n===0 ? 'hoje' : n===1 ? 'amanhã' : `em ${n} dias`;
 // meio de pagamento para exibir: com mais de um cartão, mostra o nome do cartão
-export const meioLabel = x => x.meio==='cartao' && S.cartoes.length>1 ? cartaoOf(x.cartao).nome : meioOf(x.meio);
+export const meioLabel = x => x.meio==='cartao' ? (S.cartoes.length>1 ? cartaoOf(x.cartao).nome : meioOf(x.meio))
+  : meioOf(x.meio) + (contasAtivas().length>1 ? ' · ' + nomeConta(x.conta) : '');
 
 let lastTab = null;
 export function render(){
   document.body.classList.toggle('auth', !!ui.tela);
   if(ui.tela){ $('#view').innerHTML = vAuth(); lastTab = null; return; }
-  if(ui.tab!=='ajustes') ui.cartaoEd = null;
+  if(ui.tab!=='ajustes'){ ui.cartaoEd = null; ui.contaEd = null; }
   if(ui.tab!=='metas') ui.invEd = null;   // sair de Ajustes descarta a edição de cartão pela metade
   document.querySelectorAll('nav button').forEach(b=>{
     const on = b.dataset.t===ui.tab;
@@ -186,7 +187,7 @@ function vMeses(){
 function vInicio(){
   const c = calc(ui.mes);
   let h = vMeses() + avisos() + vHero(c);
-  if(ui.mes===thisMonth()) h += vCarteira();
+  if(ui.mes===thisMonth()) h += vContasInicio() + vCarteira();
   h += `<div style="margin-top:22px">${vCategorias(c)}${vHistorico()}</div>`;
   // lista do mês; a busca e os filtros só aparecem pela lupa
   const meiosF = MEIOS.filter(m=>m.id!=='boleto'), {q, cat, meio} = ui.busca;
@@ -244,6 +245,70 @@ export function renderLista(){
   el.innerHTML = h;
 }
 
+
+/* ---------- contas bancárias ---------- */
+const nomeConta = id => (S.contas.find(c=>c.id===id) || contaPadrao())?.nome || '';
+// chips "de qual conta" (só aparecem com mais de uma conta)
+function chipsConta(rotulo, sel){
+  const ativas = contasAtivas(); if(ativas.length<2) return '';
+  const opcoes = ativas.some(c=>c.id===sel) ? ativas : [...ativas, S.contas.find(c=>c.id===sel)].filter(Boolean);
+  return `<label>${rotulo}</label><div class="chips">${opcoes.map(c=>chip(sel===c.id, 'dConta', c.id, esc(c.nome))).join('')}</div>`;
+}
+// select de conta para formulários (renda, fixos)
+const selectConta = (id, sel) => contasAtivas().length<2 ? '' :
+  `<select id="${id}">${contasAtivas().map(c=>`<option value="${esc(c.id)}" ${(sel||contaPadrao()?.id)===c.id?'selected':''}>${esc(c.nome)}</option>`).join('')}</select>`;
+
+// card "Nas contas" do Início (mês atual): saldo de agora e quanto deve sobrar no fim do mês
+function vContasInicio(){
+  const ativas = contasAtivas();
+  if(!ativas.length) return `<div class="card contas-vazio"><div><b>Saldo das contas</b><p class="note" style="margin:2px 0 0">Informe o saldo uma vez e o app vai atualizando sozinho.</p></div><button class="btn sec" data-act="novaConta">Adicionar</button></div>`;
+  const total = sum(ativas, c=>saldoConta(c)), fim = previsaoFimDoMes();
+  return `<div class="card contas">
+    <div class="contas-top"><div><div class="lbl">Nas contas agora</div><div class="saldo ${total<0?'neg':''}">${valorHTML(total)}</div></div>
+      <div class="fim"><span>Fim do mês ≈</span><b class="${fim<0?'neg':''}">${fmt(fim)}</b></div></div>
+    ${ativas.map(c=>{ const s = saldoConta(c);
+      return `<div class="row clicavel" role="button" tabindex="0" data-act="verConta" data-id="${esc(c.id)}"><div class="lanc"><span class="ico conta-ico">${inicial(c.nome)}</span><div class="t"><div>${esc(c.nome)}</div><small>toque para ver o extrato</small></div></div><b class="${s<0?'neg':''}">${fmt(s)}</b></div>`; }).join('')}
+  </div>`;
+}
+
+// extrato da conta (janela): saldo informado e cada movimento, do mais recente para o mais antigo
+export function vExtrato(id){
+  const c = S.contas.find(x=>x.id===id); if(!c) return '';
+  const hoje = todayISO(), movs = movimentosConta(c, hoje).reverse(), futuros = movimentosConta(c, '9999-12-31').filter(m=>m.data>hoje);
+  const linha = m => `<div class="row"><div class="t"><div>${esc(m.desc)}</div><small>${dLabel(m.data)}${m.tipo==='renda'?' · renda fixa':m.tipo==='fixo'?' · fixo':m.tipo==='fatura'?' · fatura paga':''}</small></div><b class="${m.valor<0?'':'pos'}">${m.valor<0?'−':'+'} ${fmt(Math.abs(m.valor))}</b></div>`;
+  return `<h2>${esc(c.nome)}</h2>
+    <div class="saldo ${saldoConta(c)<0?'neg':''}" style="margin:4px 0 2px">${valorHTML(saldoConta(c))}</div>
+    <p class="note" style="margin-top:0">Saldo informado em ${dLabel(c.desde)}: ${fmt(c.saldo)}</p>
+    <div class="fat-lista">
+      ${futuros.length ? `<p class="sm mut" style="margin:10px 0 0">Ainda vai acontecer</p>${futuros.slice(0,8).map(linha).join('')}<p class="sm mut" style="margin:12px 0 0">Já aconteceu</p>` : ''}
+      ${movs.length ? movs.slice(0,60).map(linha).join('') : '<div class="empty">Nenhum movimento desde o saldo informado.</div>'}
+    </div>
+    <button class="btn" data-act="corrigirSaldo" data-id="${esc(c.id)}">Corrigir saldo</button>
+    <button class="btn sec" data-act="fecharDlg">Fechar</button>`;
+}
+
+// Ajustes: uma linha por conta; tocar abre o editor (nome e saldo de agora)
+function vContaEditor(c){
+  const novo = !c;
+  return `<div class="kc-ed">
+    <div class="kc-ed-h"><span class="mini conta-ico">${novo ? '+' : inicial(c.nome)}</span><b>${novo ? 'Nova conta' : 'Editar conta'}</b></div>
+    <label for="cNome">Nome da conta</label><input id="cNome" maxlength="40" value="${esc(c?.nome||'')}" placeholder="ex: Nubank, Itaú, Dinheiro" autocomplete="off">
+    <label for="cSaldo">Saldo de agora</label><input id="cSaldo" inputmode="decimal" value="${c ? valIn(round2(saldoConta(c))) : ''}" placeholder="0,00" autocomplete="off">
+    <p class="note">Veja no app do banco. A partir daqui o app vai descontando sozinho.</p>
+    <div class="btns"><button class="btn sec" data-act="cancelConta">Cancelar</button><button class="btn" data-act="salvarConta">${novo ? 'Adicionar' : 'Salvar'}</button></div>
+    ${!novo ? `<button class="kc-del" data-act="delConta" data-id="${esc(c.id)}">Remover esta conta</button>` : ''}
+  </div>`;
+}
+function vContasAjustes(){
+  const ativas = contasAtivas();
+  const linha = c => ui.contaEd===c.id ? vContaEditor(c)
+    : `<button class="kc-row" data-act="edConta" data-id="${esc(c.id)}" aria-label="Editar ${esc(c.nome)}"><span class="mini conta-ico">${inicial(c.nome)}</span><span class="kc-t"><b>${esc(c.nome)}${c===ativas[0] && ativas.length>1 ? ' <span class="tag">principal</span>' : ''}</b><small>saldo ${fmt(saldoConta(c))}</small></span><span class="kc-ir">Editar</span></button>`;
+  return fold('contas', 'Contas', ativas.length ? fmt(sum(ativas, c=>saldoConta(c))) : 'nenhuma', `
+    <p class="note" style="margin:0 0 8px">Informe o saldo e o app desconta sozinho: pix, débito e dinheiro, entradas, a renda fixa, os fixos fora do cartão e as faturas marcadas como pagas.</p>
+    ${ativas.map(linha).join('')}
+    ${ui.contaEd==='novo' ? vContaEditor(null) : ui.contaEd ? '' : `<button class="btn sec" data-act="edConta" data-id="novo" style="margin-top:12px">+ Nova conta</button>`}`, ui.contaEd==='novo');
+}
+
 // compras e fixos que caem na fatura do cartão `id` que vence no mês `m` (janela aberta ao tocar no cartão)
 export function vFatura(id, m){
   const k = S.cartoes.find(x=>x.id===id); if(!k) return '';
@@ -268,6 +333,12 @@ function catsOrdenadas(){
   const desde = addDias(todayISO(), -90), cont = {};
   S.gastos.forEach(g=>{ if(g.data >= desde) cont[g.cat] = (cont[g.cat]||0) + 1; });
   return S.cats.filter(c=>!c.oculta || c.id===ui.draft.cat).map((c,i)=>({c, i, n:cont[c.id]||0})).sort((a,b)=>b.n-a.n || a.i-b.i).map(x=>x.c);
+}
+// conta do último lançamento parecido (mesmo meio de pagamento, ou a última entrada), para já vir selecionada
+function ultimaConta(tipo, meio){
+  const ok = x => x.conta && contasAtivas().some(c=>c.id===x.conta);
+  const lista = tipo==='entrada' ? S.entradas.filter(ok) : S.gastos.filter(g=>g.meio===meio && ok(g));
+  return lista.sort((a,b)=>b.criado-a.criado)[0]?.conta;
 }
 // cartão do gasto mais recente feito no cartão (para já vir selecionado)
 function ultimoCartao(){
@@ -295,6 +366,7 @@ function vLancar(){
   if(!cats.some(c=>c.id===d.cat)) d.cat = cats[0].id;
   const ativos = cartoesAtivos();
   if(!S.cartoes.some(k=>k.id===d.cartao) || (!ed && !ativos.some(k=>k.id===d.cartao))) d.cartao = ultimoCartao() || ativos[0].id;
+  if(!(S.contas||[]).some(c=>c.id===d.conta) || (!ed && !contasAtivas().some(c=>c.id===d.conta))) d.conta = ultimaConta(tipo, d.meio) || contaPadrao()?.id;
   let h = `<div class="card">`;
   if(!ed) h += `<div class="seg"><button class="chip ${tipo==='gasto'?'on':''}" aria-pressed="${tipo==='gasto'}" data-act="dTipo" data-v="gasto">Gasto</button><button class="chip ${tipo==='entrada'?'on':''}" aria-pressed="${tipo==='entrada'}" data-act="dTipo" data-v="entrada">Entrada</button></div>`;
   if(ed) h += `<h2>${tipo==='gasto'?'Editar gasto':'Editar entrada'}</h2>`;
@@ -310,11 +382,13 @@ function vLancar(){
       const opcoes = ativos.some(k=>k.id===d.cartao) ? ativos : [...ativos, cartaoOf(d.cartao)];   // editando gasto de cartão removido
       h += `<label>Qual cartão?</label><div class="chips">${opcoes.map(k=>chip(d.cartao===k.id, 'dCartao', k.id, esc(k.nome))).join('')}</div>`;
     }
+    if(d.meio!=='cartao') h += chipsConta('Saiu de qual conta?', d.conta);
     if(!ed && d.meio==='cartao'){
       h += `<label>Parcelado?</label><div class="chips"><button class="chip ${!d.parcelado?'on':''}" aria-pressed="${!d.parcelado}" data-act="dParc" data-v="0">À vista</button><button class="chip ${d.parcelado?'on':''}" aria-pressed="${d.parcelado}" data-act="dParc" data-v="1">Parcelado</button></div>`;
       if(d.parcelado) h += `<label for="gParc">Em quantas vezes?</label><input id="gParc" inputmode="numeric" placeholder="ex: 6"><p class="note" id="gTotal">Digite o valor de cada parcela e quantas vezes.</p>`;
     }
   }
+  if(tipo==='entrada') h += chipsConta('Entrou em qual conta?', d.conta);
   h += `<label for="gData">${parc ? 'Data da compra' : 'Data'}</label><input id="gData" type="date" value="${ed ? ed.data : todayISO()}">
     <button class="btn" data-act="saveG">${ed ? 'Salvar alterações' : tipo==='gasto' ? 'Salvar gasto' : 'Salvar entrada'}</button>
     ${ed ? '<button class="btn sec" data-act="cancelG">Cancelar edição</button>' : ''}
@@ -355,7 +429,7 @@ function vFixos(){
   const fix = ativos.filter(r=>r.tipo==='fixo'), par = ativos.filter(r=>r.tipo==='parcela');
   const line = r => {
     const ct = catOf(r.cat);
-    let sub = esc(meioLabel(r));
+    let sub = esc(meioLabel(r)) + (r.meio!=='cartao' ? ` · dia ${r.dia||10}` : '');
     // último mês efetivo: fim das parcelas ou data de encerramento, o que vier antes
     let ult = r.tipo==='parcela' ? addM(r.inicio, r.parcelas-1) : null;
     if(r.fim && (!ult || diffM(r.fim, ult) > 0)) ult = r.fim;
@@ -397,6 +471,8 @@ function vFixos(){
       <div><label for="rIni">1ª fatura / 1º pagamento</label><input id="rIni" type="month" value="${e?.inicio||hoje}"></div>
       <div><label for="rMeio">Pago com</label><select id="rMeio">${MEIOS.map(m=>`<option value="${m.id}" ${(e?.meio||'cartao')===m.id?'selected':''}>${m.n}</option>`).join('')}</select></div>
       ${S.cartoes.length>1 ? `<div><label for="rCartao">Cartão (se pago no cartão)</label><select id="rCartao">${S.cartoes.filter(k=>!k.arquivado || k.id===e?.cartao).map(k=>`<option value="${esc(k.id)}" ${e?.cartao===k.id?'selected':''}>${esc(k.nome)}</option>`).join('')}</select></div>` : ''}
+      <div><label for="rDia">Dia do pagamento (fora do cartão)</label><input id="rDia" inputmode="numeric" value="${e?.dia||''}" placeholder="ex: 10"></div>
+      ${contasAtivas().length>1 ? `<div><label for="rConta">Sai de qual conta</label>${selectConta('rConta', e?.conta)}</div>` : ''}
       <div><label for="rCat">Categoria</label><select id="rCat">${S.cats.filter(c=>!c.oculta || c.id===e?.cat).map(c=>`<option value="${esc(c.id)}" ${(e?.cat||'outros')===c.id?'selected':''}>${esc(c.n)}</option>`).join('')}</select></div>
       <div><label for="rFim">Último mês (opcional)</label><input id="rFim" type="month" value="${e?.fim||''}"></div>
       ${e && e.tipo==='fixo' ? `<div><label for="rVig">Se mudou o valor, vale a partir de</label><input id="rVig" type="month" value="${hoje}"></div>` : ''}
@@ -572,8 +648,11 @@ function vAjustes(){
   const c = S.config, d = diasSemBackup();
   const ultimo = d===null ? 'Nenhum backup feito ainda.' : `Último backup: ${dLabel(c.ultimoBackup)}/${c.ultimoBackup.slice(0,4)} (${d===0?'hoje':d===1?'ontem':`há ${d} dias`}).`;
   return `${vConta()}
+  ${vContasAjustes()}
   ${fold('renda', 'Renda', fmt(c.renda), `
     <label for="cRenda" style="margin-top:0">Renda fixa mensal (salário, pró-labore)</label><input id="cRenda" inputmode="decimal" value="${valIn(c.renda)||'0'}">
+    <div class="two-in"><div><label for="cDia">Dia que cai na conta</label><input id="cDia" inputmode="numeric" value="${c.diaRenda||5}"></div>
+      ${contasAtivas().length>1 ? `<div><label for="cConta">Em qual conta</label>${selectConta('cConta', c.contaRenda)}</div>` : ''}</div>
     <p class="note">Recebe valores que mudam todo mês (MEI, freelas, extras)? Lance cada recebimento como <b>Entrada</b> no botão +. Se toda a sua renda varia, deixe 0 aqui.</p>
     <button class="btn" data-act="saveCfg">Salvar</button>`, !S.config.configurado)}
 

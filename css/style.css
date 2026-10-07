@@ -101,6 +101,18 @@ p.note{font-size:13px;color:var(--mut);margin-top:8px}
 .banner{background:color-mix(in srgb,var(--amb) 14%,var(--surface));color:var(--ink);padding:11px 14px;border-radius:var(--r-ctl);font-size:13.5px;line-height:1.4}
 .banner a{color:var(--amb);font-weight:650;cursor:pointer;white-space:nowrap}
 
+/* ---------- contas bancárias ---------- */
+.contas{margin-top:12px;padding-top:16px;padding-bottom:8px}
+.contas-top{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;padding-bottom:10px;border-bottom:1px solid var(--line)}
+.contas .lbl{color:var(--mut);font-size:13.5px}
+.saldo{font-family:var(--display);font-weight:var(--display-w);letter-spacing:var(--display-track);font-size:30px;line-height:1.1}
+.saldo .cents{color:var(--mut)}
+.contas-top .fim{text-align:right;font-size:13px;color:var(--mut)}
+.contas-top .fim b{display:block;color:var(--ink);font-size:15.5px;font-weight:650}
+.conta-ico{background:var(--surface-2);color:var(--ink);display:grid;place-items:center;font-weight:700;font-size:13px}
+.contas-vazio{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px}
+.contas-vazio .btn{width:auto;margin:0;padding:10px 16px;font-size:14px;flex:none}
+
 /* ---------- faixa de meses ---------- */
 .meses{display:flex;gap:8px;overflow-x:auto;margin:0 -16px 12px;padding:2px 16px 4px;scrollbar-width:none;scroll-behavior:smooth}
 .meses::-webkit-scrollbar{display:none}

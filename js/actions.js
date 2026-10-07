@@ -1,8 +1,8 @@
 import { S, save, setS, trocaS, catOf, cartaoOf, cartoesAtivos } from './store.js';
 import * as nuvem from './nuvem.js';
 import { empty } from './model.js';
-import { faturaMonth } from './finance.js';
-import { ui, render, totalParcelado, statusTexto, vFatura } from './views.js';
+import { faturaMonth, saldoConta, contasAtivas } from './finance.js';
+import { ui, render, totalParcelado, statusTexto, vFatura, vExtrato } from './views.js';
 import { ask } from './modal.js';
 import { cifrar } from './crypto.js';
 import { CATS, CORES_CARTAO } from './config.js';
@@ -39,10 +39,20 @@ export const A = {
   novo(d){ ui.draft.tipo=d.v; ui.editG=null; ui.tab='lancar'; render(); },
   dCat(d){ ui.draft.cat=d.id; ui.draft.catManual=true; keepDraft(); },
   olho(){ setDiscreto(!discreto.on); render(); },
-  pagaFat(d){
+  async pagaFat(d){
     const k = S.cartoes.find(x=>x.id===d.id); if(!k || !/^\d{4}-\d{2}$/.test(d.m)) return;
     const pagas = new Set(k.pagas||[]), era = pagas.has(d.m);
-    if(era) pagas.delete(d.m); else pagas.add(d.m);
+    if(era){ pagas.delete(d.m); if(k.pagtos){ delete k.pagtos[d.m]; if(!Object.keys(k.pagtos).length) delete k.pagtos; } }
+    else{
+      // de qual conta saiu o pagamento (com uma conta só, é ela)
+      const ativas = contasAtivas(); let conta = ativas[0]?.id;
+      if(ativas.length>1){
+        const r = await ask({titulo:'Pagou com qual conta?', texto:`Fatura de ${mLabel(d.m)} do ${esc(k.nome)}. O valor sai do saldo dessa conta.`, botoes:ativas.map(c=>({id:c.id, rotulo:c.nome}))});
+        if(!r) return; conta = r.botao;
+      }
+      pagas.add(d.m);
+      if(conta) (k.pagtos ||= {})[d.m] = {conta, data:todayISO(), ts:Date.now()};
+    }
     if(pagas.size) k.pagas = [...pagas].sort().slice(-24); else delete k.pagas;
     save(); toast(era ? 'Fatura volta a ficar em aberto' : 'Fatura marcada como paga ✓'); render();
   },
@@ -62,11 +72,13 @@ export const A = {
       if(x){
         Object.assign(x, {valor:round2(v), data, desc});
         if(ui.editG.k==='gasto'){ Object.assign(x, {cat:d.cat, meio:d.meio}); if(d.meio==='cartao') x.cartao = d.cartao; else delete x.cartao; }
+        if(d.conta && (ui.editG.k==='entrada' || d.meio!=='cartao')) x.conta = d.conta; else delete x.conta;
       }
       ui.editG = null; ui.tab = 'inicio';
       save(); toast('Alterações salvas ✓');
     } else if(d.tipo==='entrada'){
-      S.entradas.push({id:uid(), data, valor:round2(v), desc, criado:Date.now()});
+      const e = {id:uid(), data, valor:round2(v), desc, criado:Date.now()}; if(d.conta) e.conta = d.conta;
+      S.entradas.push(e);
       save(); toast('Entrada salva ✓');
     } else if(d.meio==='cartao' && d.parcelado){
       const n = parseInt($('#gParc')?.value,10);
@@ -76,7 +88,7 @@ export const A = {
       save(); toast(`${n}x de ${fmtReal(v)} (total ${fmtReal(v*n)}) — está em Fixos`);
     } else {
       const g = {id:uid(), data, valor:round2(v), cat:d.cat, meio:d.meio, desc, criado:Date.now()};
-      if(d.meio==='cartao') g.cartao = d.cartao;
+      if(d.meio==='cartao') g.cartao = d.cartao; else if(d.conta) g.conta = d.conta;
       S.gastos.push(g);
       save(); toast('Gasto salvo ✓');
     }
@@ -90,6 +102,7 @@ export const A = {
     const x = (d.k==='gasto' ? S.gastos : S.entradas).find(i=>i.id===d.id); if(!x) return;
     ui.editG = {k:d.k, id:d.id};
     if(d.k==='gasto'){ ui.draft.cat = x.cat; ui.draft.meio = x.meio; if(x.cartao) ui.draft.cartao = x.cartao; }
+    if(x.conta) ui.draft.conta = x.conta;
     ui.tab = 'lancar'; render();
   },
   cancelG(){ ui.editG=null; ui.tab='inicio'; render(); },
@@ -124,6 +137,7 @@ export const A = {
     if(fim && diffM(inicio, fim) < 0) return toast('O último mês não pode ser antes do início');
     const obj = {nome, valor:round2(valor), tipo, meio:$('#rMeio').value, inicio, cat:$('#rCat').value};
     if(tipo==='parcela') obj.parcelas = parcelas;
+    if(obj.meio!=='cartao'){ const dia = parseInt($('#rDia')?.value, 10); if(dia>=1 && dia<=31) obj.dia = dia; if($('#rConta')) obj.conta = $('#rConta').value; }
     if(obj.meio==='cartao') obj.cartao = $('#rCartao')?.value || (ui.editId && S.recorrentes.find(x=>x.id===ui.editId)?.cartao) || cartoesAtivos()[0].id;
     const r = ui.editId && S.recorrentes.find(x=>x.id===ui.editId);
     const vig = $('#rVig')?.value;
@@ -135,7 +149,8 @@ export const A = {
       S.recorrentes.push(novo);
       toast(`Reajuste salvo: ${fmt(obj.valor)} a partir de ${mLabel(vig)}`);
     } else if(r){
-      Object.assign(r, obj); if(tipo==='fixo') delete r.parcelas; if(obj.meio!=='cartao') delete r.cartao;
+      Object.assign(r, obj); if(tipo==='fixo') delete r.parcelas; if(obj.meio!=='cartao') delete r.cartao; else { delete r.dia; delete r.conta; }
+      if(obj.meio!=='cartao' && !obj.dia) delete r.dia;
       if(fim) r.fim = fim; else delete r.fim;
       toast('Salvo ✓');
     } else {
@@ -184,6 +199,41 @@ export const A = {
     m.atual = novo; (m.movs ||= []).push({data:todayISO(), valor:delta});
     save(); toast(s>0?'Boa! 💪':'Retirada registrada'); render();
   },
+  /* contas bancárias */
+  dConta(d){ ui.draft.conta = d.id; keepDraft(); },
+  novaConta(){ ui.tab = 'ajustes'; ui.contaEd = 'novo'; ui.abertos.add('contas'); render(); $('#cNome')?.focus(); },
+  edConta(d){ ui.contaEd = d.id; render(); $('#cNome')?.focus(); },
+  cancelConta(){ ui.contaEd = null; render(); },
+  salvarConta(){
+    const nome = $('#cNome').value.trim().slice(0,40), saldo = parseNum($('#cSaldo').value || '0');
+    if(!nome) return toast('Dê um nome à conta');
+    if(!Number.isFinite(saldo)) return toast('Confira o saldo');
+    const marco = {saldo:round2(saldo), desde:todayISO(), desdeTs:Date.now()};   // saldo de agora: daqui pra frente o app atualiza
+    if(ui.contaEd==='novo'){ (S.contas ||= []).push({id:'c'+uid(), nome, ...marco}); toast('Conta adicionada ✓'); }
+    else{
+      const c = S.contas.find(x=>x.id===ui.contaEd); if(!c) return;
+      const mudouSaldo = round2(saldo)!==round2(saldoConta(c));
+      c.nome = nome; if(mudouSaldo) Object.assign(c, marco);
+      toast('Conta salva ✓');
+    }
+    ui.contaEd = null; save(); render();
+  },
+  delConta(d){
+    const c = S.contas.find(x=>x.id===d.id); if(!c) return;
+    c.arquivada = true; ui.contaEd = null; save(); render();
+    toast(`"${c.nome}" removida`, {rotulo:'Desfazer', fn:()=>{ delete c.arquivada; save(); render(); }});
+  },
+  verConta(d){ const dlg = $('#dlg'); dlg.innerHTML = vExtrato(d.id); dlg.onclick = dlg.onkeydown = dlg.oncancel = null; if(!dlg.open) dlg.showModal(); },
+  async corrigirSaldo(d){
+    const c = S.contas.find(x=>x.id===d.id); if(!c) return;
+    const r = await ask({titulo:`Saldo de "${c.nome}"`, texto:`Veja no app do banco quanto tem agora. O app mostra ${fmtReal(saldoConta(c))}.`,
+      campos:[{id:'v', rotulo:'Saldo de agora', inputmode:'decimal', placeholder:valIn(round2(saldoConta(c)))||'0,00'}],
+      botoes:[{id:'ok', rotulo:'Corrigir'}], validar:(b,v)=> Number.isFinite(parseNum(v.v)) ? '' : 'Digite o saldo'});
+    if(!r) return;
+    Object.assign(c, {saldo:round2(parseNum(r.valores.v)), desde:todayISO(), desdeTs:Date.now()});
+    save(); toast('Saldo corrigido ✓'); render();
+  },
+
   /* investimentos */
   invEd(d){ ui.invEd = ui.invEd===d.id ? null : d.id; render(); },
   invTipo(d){ ui.invNovoTipo = d.v; keepInv(); },
@@ -256,7 +306,10 @@ export const A = {
   saveCfg(){
     const r=parseNum($('#cRenda').value||'0');
     if(!(r>=0)) return toast('Confira o valor da renda');
-    Object.assign(S.config,{renda:round2(r), configurado:true}); save(); toast('Renda salva ✓');
+    const dia = parseInt($('#cDia')?.value, 10);
+    Object.assign(S.config,{renda:round2(r), configurado:true, diaRenda: dia>=1 && dia<=31 ? dia : 5});
+    if($('#cConta')) S.config.contaRenda = $('#cConta').value;
+    save(); toast('Renda salva ✓');
   },
 
   edCartao(d){
