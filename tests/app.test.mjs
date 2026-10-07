@@ -926,3 +926,24 @@ test('contas: criar em Ajustes e, com duas contas, escolher de qual conta saiu',
   assert.match(await page.textContent('#lista'), /Pix · Itaú/);
   await ctx.close();
 });
+
+test('fatura: apagar compra pela lista do cartão, com desfazer, e ir ao fixo da parcela', async()=>{
+  const {page, ctx} = await abrir(estado({cartoes:[{id:'k1', nome:'Bradesco', fechamento:1, vencimento:31}],
+    gastos:[{id:'g1', data:ym(-1)+'-15', valor:500, cat:'mercado', meio:'cartao', cartao:'k1', desc:'Compra errada', criado:1},
+            {id:'g2', data:ym(-1)+'-16', valor:80, cat:'mercado', meio:'cartao', cartao:'k1', desc:'Outra', criado:2}],
+    recorrentes:[{id:'r1', nome:'TV', valor:100, tipo:'parcela', parcelas:5, meio:'cartao', cartao:'k1', inicio:ym(0), cat:'compras'}]}));
+  await page.click('.ccard[data-act="verFatura"]'); await page.waitForSelector('#dlg[open]');
+  assert.match(await page.textContent('#dlg .fat-total'), /680,00/);
+  await page.click('#dlg [data-act="delL"][data-id="g1"]');
+  assert.equal((await lerEstado(page)).gastos.length, 1);
+  assert.ok(await page.isVisible('#dlg'), 'a janela continua aberta');
+  assert.match(await page.textContent('#dlg .fat-total'), /180,00/, 'o total atualiza na hora');
+  assert.ok(await page.isVisible('#dlg #toast button'), 'o Desfazer aparece por cima da janela');
+  await page.click('#dlg #toast button');
+  assert.equal((await lerEstado(page)).gastos.length, 2);
+  assert.match(await page.textContent('#dlg .fat-total'), /680,00/);
+  await page.click('#dlg [data-act="irFixo"][data-id="r1"]');
+  assert.equal(await page.isVisible('#dlg'), false);
+  assert.equal(await page.inputValue('#rNome'), 'TV');
+  await ctx.close();
+});

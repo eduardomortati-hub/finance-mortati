@@ -29,7 +29,8 @@ export const sum = (arr,f=x=>x.valor) => arr.reduce((a,x)=>a+(Number(f(x))||0),0
 
 // aviso rápido; com `acao` ({rotulo, fn}) mostra um botão (ex.: Desfazer) e fica mais tempo na tela
 export function toast(t, acao){
-  const el = $('#toast'); el.textContent = t;
+  const el = $('#toast'), dlg = $('#dlg'); el.textContent = t;
+  (dlg?.open ? dlg : document.body).appendChild(el);   // janela aberta fica por cima de tudo: o aviso vai junto
   if(acao){ const b = document.createElement('button'); b.textContent = acao.rotulo; b.onclick = ()=>{ el.classList.remove('show'); acao.fn(); }; el.append(b); }
   el.classList.toggle('com-acao', !!acao);
   el.classList.add('show'); clearTimeout(toast._t); toast._t = setTimeout(()=>el.classList.remove('show'), acao ? 5000 : 2400);

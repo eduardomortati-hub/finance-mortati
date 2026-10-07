@@ -95,8 +95,9 @@ export const A = {
     d.parcelado = false; d.catManual = false;
     render();
   },
-  verFatura(d){ const dlg = $('#dlg'); dlg.innerHTML = vFatura(d.id, d.m); dlg.onclick = dlg.onkeydown = null; dlg.oncancel = null; if(!dlg.open) dlg.showModal(); },
+  verFatura(d){ abrirJanela({tipo:'fatura', id:d.id, m:d.m}, vFatura(d.id, d.m)); },
   fecharDlg(){ const dlg = $('#dlg'); if(dlg.open) dlg.close(); },
+  irFixo(d){ A.fecharDlg(); ui.tab = 'fixos'; ui.abertos.add('addR'); A.editR(d); },
   editL(d){
     if($('#dlg').open) $('#dlg').close();   // veio da lista da fatura
     const x = (d.k==='gasto' ? S.gastos : S.entradas).find(i=>i.id===d.id); if(!x) return;
@@ -223,7 +224,7 @@ export const A = {
     c.arquivada = true; ui.contaEd = null; save(); render();
     toast(`"${c.nome}" removida`, {rotulo:'Desfazer', fn:()=>{ delete c.arquivada; save(); render(); }});
   },
-  verConta(d){ const dlg = $('#dlg'); dlg.innerHTML = vExtrato(d.id); dlg.onclick = dlg.onkeydown = dlg.oncancel = null; if(!dlg.open) dlg.showModal(); },
+  verConta(d){ abrirJanela({tipo:'conta', id:d.id}, vExtrato(d.id)); },
   async corrigirSaldo(d){
     const c = S.contas.find(x=>x.id===d.id); if(!c) return;
     const r = await ask({titulo:`Saldo de "${c.nome}"`, texto:`Veja no app do banco quanto tem agora. O app mostra ${fmtReal(saldoConta(c))}.`,
@@ -418,6 +419,14 @@ export const A = {
     trocaS(empty()); ui.tela = 'entrar'; ui.tab = 'inicio'; render();
   }
 };
+
+// janela de fatura/extrato: fica atualizada enquanto aberta (ui.dlg) e some do estado ao fechar
+function abrirJanela(qual, html){
+  const dlg = $('#dlg'); ui.dlg = qual; dlg.innerHTML = html;
+  dlg.onclick = dlg.onkeydown = dlg.oncancel = null;
+  dlg.onclose = ()=>{ ui.dlg = null; dlg.onclose = null; };
+  if(!dlg.open) dlg.showModal();
+}
 
 /* ---------- ajudantes da conta ---------- */
 function erroAuth(msg){ const p = $('.auth-erro'); if(!p) return toast(msg); p.textContent = msg; p.hidden = false; }

@@ -3,7 +3,7 @@
 import { $, esc } from './util.js';
 
 export function ask({titulo, texto='', campos=[], botoes=[{id:'ok', rotulo:'OK'}], cancelar='Cancelar', validar}){
-  const dlg = $('#dlg');
+  const dlg = $('#dlg'); dlg.onclose?.();
   dlg.innerHTML = `<h2>${esc(titulo)}</h2>${texto?`<p class="note">${texto}</p>`:''}
     ${campos.map(c=>`<label for="dlg-${c.id}">${esc(c.rotulo)}</label><input id="dlg-${c.id}" type="${c.tipo||'text'}" ${c.tipo==='password'?'autocomplete="new-password"':'autocomplete="off"'} ${c.inputmode?`inputmode="${c.inputmode}"`:''} placeholder="${esc(c.placeholder||'')}">`).join('')}
     <p class="dlg-erro neg sm" hidden></p>

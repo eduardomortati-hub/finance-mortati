@@ -7,6 +7,7 @@ import { $, esc, fmt, todayISO, thisMonth, addM, diffM, mLabel, dLabel, sum, nor
 // estado da interface (não é salvo)
 export const ui = {tab:'inicio', mes:thisMonth(), draft:{tipo:'gasto', cat:null, meio:'cartao', parcelado:false},
   editId:null, editG:null, contaEd:null, cartaoEd:null, cartaoCor:null, invEd:null, invNovoTipo:'cdb', invNovoJa:true, busca:{q:'', cat:'', meio:''}, buscaAberta:false,
+  dlg:null,   // janela aberta que acompanha as mudanças: {tipo:'fatura'|'conta', id, m}
   abertos:new Set(), tela:null, authMsg:''};   // tela: entrar | criar | esqueci | novaSenha | aviso (antes de entrar no app)   // seções recolhíveis que a pessoa abriu (data-fold)
 
 const ymBR = k => mLabel(k,true)+'/'+k.slice(2,4);
@@ -42,6 +43,8 @@ export function render(){
     if(on) f.scrollLeft = on.offsetLeft - f.clientWidth/2 + on.offsetWidth/2;
   }
   if(ui.tab==='lancar'){ const v=$('#gValor'); if(v && !v.value) setTimeout(()=>v.focus(),50); }
+  const dlg = $('#dlg');
+  if(dlg.open && ui.dlg) dlg.innerHTML = ui.dlg.tipo==='fatura' ? vFatura(ui.dlg.id, ui.dlg.m) : vExtrato(ui.dlg.id);
   if(ui.tab!==lastTab) window.scrollTo(0,0);   // só volta ao topo ao trocar de aba
   lastTab = ui.tab;
 }
@@ -320,9 +323,9 @@ export function vFatura(id, m){
     <p class="note" style="margin-top:2px">Compras de ${dLabel(p.ini)} a ${dLabel(p.fim)}</p><div class="fat-lista">`;
   if(!compras.length && !fixos.length) h += `<div class="empty">Nenhuma compra nesta fatura.</div>`;
   compras.forEach(g=>{ const ct = catOf(g.cat);
-    h += `<div class="row"><div class="lanc"><span class="ico" style="background:${ct.c}">${inicial(ct.n)}</span><div class="t"><div>${esc(g.desc||ct.n)}</div><small>${dLabel(g.data)}/${g.data.slice(2,4)}, ${esc(ct.n)}</small></div></div><span style="white-space:nowrap"><b>${fmt(g.valor)}</b><button class="x" data-act="editL" data-k="gasto" data-id="${esc(g.id)}" aria-label="Editar">✎&#xFE0E;</button></span></div>`; });
+    h += `<div class="row"><div class="lanc"><span class="ico" style="background:${ct.c}">${inicial(ct.n)}</span><div class="t"><div>${esc(g.desc||ct.n)}</div><small>${dLabel(g.data)}/${g.data.slice(2,4)}, ${esc(ct.n)}</small></div></div><span style="white-space:nowrap"><b>${fmt(g.valor)}</b><button class="x" data-act="editL" data-k="gasto" data-id="${esc(g.id)}" aria-label="Editar">✎&#xFE0E;</button><button class="x" data-act="delL" data-k="gasto" data-id="${esc(g.id)}" aria-label="Apagar">×</button></span></div>`; });
   fixos.forEach(r=>{ const ct = catOf(r.cat), info = recInMonth(r, m);
-    h += `<div class="row"><div class="lanc"><span class="ico" style="background:${ct.c}">${inicial(ct.n)}</span><div class="t"><div>${esc(r.nome)}</div><small>${r.tipo==='parcela' ? `parcela ${info.n}/${r.parcelas}` : 'fixo mensal'}</small></div></div><b>${fmt(r.valor)}</b></div>`; });
+    h += `<div class="row"><div class="lanc"><span class="ico" style="background:${ct.c}">${inicial(ct.n)}</span><div class="t"><div>${esc(r.nome)}</div><small>${r.tipo==='parcela' ? `parcela ${info.n}/${r.parcelas}` : 'fixo mensal'} · muda em Fixos</small></div></div><span style="white-space:nowrap"><b>${fmt(r.valor)}</b><button class="x" data-act="irFixo" data-id="${esc(r.id)}" aria-label="Editar, encerrar ou apagar em Fixos">✎&#xFE0E;</button></span></div>`; });
   return h + `</div><div class="row fat-total"><b>Total</b><b>${fmt(total)}</b></div>
     <button class="btn sec" data-act="fecharDlg">Fechar</button>`;
 }
