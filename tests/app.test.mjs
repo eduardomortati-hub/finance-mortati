@@ -848,3 +848,32 @@ test('conta: criar conta pede confirmação por e-mail; esqueci a senha e link d
   assert.equal(u.senha, 'nova123');
   await ctx.close();
 });
+
+test('fatura com compras de outro mês: aviso na lista e o cartão mostra as compras', async()=>{
+  // fecha dia 1 e vence dia 10: a fatura que vence neste mês é das compras do mês passado
+  const {page, ctx} = await abrir(estado({cartoes:[{id:'k1', nome:'Bradesco', fechamento:1, vencimento:31}],
+    gastos:[{id:'g1', data:ym(-1)+'-15', valor:500, cat:'mercado', meio:'cartao', cartao:'k1', desc:'Compra grande', criado:1}]}));
+  assert.match(await page.textContent('#listaTit'), /\(0\)/);
+  assert.match(await page.textContent('.note.fora'), /500,00/, 'avisa de onde vem o valor da fatura');
+  await page.click('.ccard[data-act="verFatura"]');
+  await page.waitForSelector('#dlg[open]');
+  assert.match(await page.textContent('#dlg'), /Compra grande/);
+  assert.match(await page.textContent('#dlg .fat-total'), /500,00/);
+  await page.click('#dlg [data-act="editL"]');
+  assert.equal(await page.isVisible('#dlg'), false);
+  assert.equal(await page.inputValue('#gValor'), '500');
+  await ctx.close();
+});
+
+test('faixa de meses no Início: mostra a sobra de cada mês e troca o mês ao tocar', async()=>{
+  const {page, ctx} = await abrir(estado({gastos:[{id:'g1', data:ym(-1)+'-05', valor:1300, cat:'mercado', meio:'pix', desc:'x', criado:1}]}));   // renda 1000
+  const chip = k => page.textContent(`.mes-chip[data-m="${k}"] b`);
+  assert.match(await chip(ym(0)), /1 mil/);
+  assert.match(await chip(ym(-1)), /−300/, 'mês passado ficou negativo');
+  assert.ok(await page.$(`.mes-chip.fut[data-m="${ym(1)}"]`), 'meses seguintes como previsão');
+  await page.click(`.mes-chip[data-m="${ym(-1)}"]`);
+  assert.equal(await page.getAttribute(`.mes-chip[data-m="${ym(-1)}"]`, 'aria-pressed'), 'true');
+  assert.match(await page.textContent('.big'), /300/);
+  assert.match(await page.textContent('#lista'), /x/);
+  await ctx.close();
+});

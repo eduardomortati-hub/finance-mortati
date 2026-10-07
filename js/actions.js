@@ -2,7 +2,7 @@ import { S, save, setS, trocaS, catOf, cartaoOf, cartoesAtivos } from './store.j
 import * as nuvem from './nuvem.js';
 import { empty } from './model.js';
 import { faturaMonth } from './finance.js';
-import { ui, render, totalParcelado, statusTexto } from './views.js';
+import { ui, render, totalParcelado, statusTexto, vFatura } from './views.js';
 import { ask } from './modal.js';
 import { cifrar } from './crypto.js';
 import { CATS, CORES_CARTAO } from './config.js';
@@ -28,6 +28,7 @@ function lerCats(){
 export const A = {
   tab(d){ ui.tab=d.t; ui.editId=null; ui.editG=null; render(); },
   mes(d){ ui.mes=addM(ui.mes, Number(d.d)); render(); },
+  irMes(d){ if(/^\d{4}-\d{2}$/.test(d.m)){ ui.mes = d.m; render(); } },
   tema(){ window.alternarTema?.(); render(); },
   busca(){
     const {q, cat, meio} = ui.busca;
@@ -82,7 +83,10 @@ export const A = {
     d.parcelado = false; d.catManual = false;
     render();
   },
+  verFatura(d){ const dlg = $('#dlg'); dlg.innerHTML = vFatura(d.id, d.m); dlg.onclick = dlg.onkeydown = null; dlg.oncancel = null; if(!dlg.open) dlg.showModal(); },
+  fecharDlg(){ const dlg = $('#dlg'); if(dlg.open) dlg.close(); },
   editL(d){
+    if($('#dlg').open) $('#dlg').close();   // veio da lista da fatura
     const x = (d.k==='gasto' ? S.gastos : S.entradas).find(i=>i.id===d.id); if(!x) return;
     ui.editG = {k:d.k, id:d.id};
     if(d.k==='gasto'){ ui.draft.cat = x.cat; ui.draft.meio = x.meio; if(x.cartao) ui.draft.cartao = x.cartao; }

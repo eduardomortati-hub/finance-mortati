@@ -7,6 +7,7 @@ import { $, toast, discreto, setDiscreto } from './util.js';
 
 document.addEventListener('click', e=>{ const b=e.target.closest('[data-act]'); if(!b) return; e.preventDefault(); const f=A[b.dataset.act]; if(f) f(b.dataset,b); });
 document.addEventListener('keydown', e=>{
+  if((e.key==='Enter' || e.key===' ') && e.target.matches?.('[role="button"][data-act]')){ e.preventDefault(); return e.target.click(); }
   if(e.key==='Enter' && e.target.id==='nCat'){ e.preventDefault(); return A.addCat(); }
   if(e.key==='Enter' && ui.tela && e.target.tagName==='INPUT'){ e.preventDefault(); return document.querySelector('.auth-box .btn')?.click(); }
   if(e.key==='Enter' && ui.tab==='lancar' && e.target.tagName==='INPUT' && !e.target.closest('dialog')) A.saveG();

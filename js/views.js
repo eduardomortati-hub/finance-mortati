@@ -1,7 +1,7 @@
 import { CATS, MEIOS, RULES, CORES_CARTAO, TIPOS_INV, tipoInv, meioOf } from './config.js';
 import { S, catOf, catsAtivas, cartaoOf, cartoesAtivos } from './store.js';
 import { sessao, status as syncStatus, pendente } from './nuvem.js';
-import { calc, recInMonth, faturaPeriodo, vencimentoData, infoCartao, rendimentoNoMes } from './finance.js';
+import { calc, recInMonth, faturaMonth, faturaPeriodo, vencimentoData, infoCartao, rendimentoNoMes } from './finance.js';
 import { $, esc, fmt, todayISO, thisMonth, addM, diffM, mLabel, dLabel, sum, normTxt, diasEntre, addDias, valIn, parseNum, fmtReal, discreto } from './util.js';
 
 // estado da interface (não é salvo)
@@ -34,7 +34,12 @@ export function render(){
   $('#mesLbl').textContent = mLabel(ui.mes);
   $('#temaBtn').setAttribute('aria-label', document.documentElement.dataset.theme==='light' ? 'Ativar modo escuro' : 'Ativar modo claro');
   $('#view').innerHTML = ({inicio:vInicio, lancar:vLancar, fixos:vFixos, metas:vMetas, ajustes:vAjustes})[ui.tab]();
-  if(ui.tab==='inicio') renderLista();
+  if(ui.tab==='inicio'){
+    renderLista();
+    // deixa o mês escolhido visível na faixa (sem rolar a página)
+    const f = $('#meses'), on = f?.querySelector('.on');
+    if(on) f.scrollLeft = on.offsetLeft - f.clientWidth/2 + on.offsetWidth/2;
+  }
   if(ui.tab==='lancar'){ const v=$('#gValor'); if(v && !v.value) setTimeout(()=>v.focus(),50); }
   if(ui.tab!==lastTab) window.scrollTo(0,0);   // só volta ao topo ao trocar de aba
   lastTab = ui.tab;
@@ -85,7 +90,7 @@ function vHero(c){
   const faturas = c.porCartao.filter(x=>!x.cartao.arquivado || x.total);
   const linhas = faturas.map(x=>{
     const p = faturaPeriodo(ui.mes, x.cartao);
-    return `<div class="row"><div class="lanc"><span class="ico ${corCartao(x.cartao)}">${inicial(x.cartao.nome)}</span><div class="t"><div>${esc(x.cartao.nome)}${(x.cartao.pagas||[]).includes(ui.mes) ? '<span class="tag pos">paga</span>' : ''}</div><small>vence ${dLabel(vencimentoData(ui.mes, x.cartao))}, compras de ${dLabel(p.ini)} a ${dLabel(p.fim)}</small></div></div><b>${fmt(x.total)}</b></div>`;
+    return `<div class="row clicavel" role="button" tabindex="0" data-act="verFatura" data-id="${esc(x.cartao.id)}" data-m="${ui.mes}"><div class="lanc"><span class="ico ${corCartao(x.cartao)}">${inicial(x.cartao.nome)}</span><div class="t"><div>${esc(x.cartao.nome)}${(x.cartao.pagas||[]).includes(ui.mes) ? '<span class="tag pos">paga</span>' : ''}</div><small>vence ${dLabel(vencimentoData(ui.mes, x.cartao))}, compras de ${dLabel(p.ini)} a ${dLabel(p.fim)}</small></div></div><b>${fmt(x.total)}</b></div>`;
   }).join('');
   return `<details class="card hero" data-fold="hero" ${ui.abertos.has('hero')?'open':''}><summary>
     <div class="hero-top"><div class="lbl">${c.sobra>=0 ? 'Sobra prevista' : 'Vai faltar'}</div><button class="olho" data-act="olho" aria-pressed="${discreto.on}" aria-label="${discreto.on ? 'Mostrar valores' : 'Esconder valores'}">${discreto.on ? OLHO_X : OLHO}</button></div>
@@ -121,7 +126,7 @@ function vCarteira(){
       ? `<b class="hoje">Hoje é o melhor dia de compra</b> · ${i.diasHoje} dias para pagar`
       : `Melhor dia de compra: <b>${dLabel(i.melhorDia)}</b> · ${i.diasMelhor} dias para pagar`;
     return `<div class="cc-col">
-      <div class="ccard ${corCartao(k)}">
+      <div class="ccard ${corCartao(k)}" role="button" tabindex="0" data-act="verFatura" data-id="${esc(k.id)}" data-m="${fechada ? i.prox : i.aberta}" aria-label="Ver as compras da fatura do ${esc(k.nome)}">
         <div class="top"><span class="nome">${esc(k.nome)}</span><span class="dias">fecha dia ${k.fechamento}<br>vence dia ${k.vencimento}</span></div>
         <div class="val">${topo}</div>
         <div class="bottom">${rodape}</div>
@@ -160,9 +165,27 @@ function vCategorias(c){
   return fold('cats', 'Para onde foi', cats.length ? fmt(sum(cats, x=>x[1])) : '', h);
 }
 
+// faixa de meses no topo do Início: a sobra de cada mês (6 para trás e 3 de previsão); tocar troca o mês da tela
+function vMeses(){
+  const hoje = thisMonth();
+  let ini = addM(hoje, -6), fim = addM(hoje, 3);
+  if(diffM(ui.mes, ini) > 0) ini = ui.mes;            // mês escolhido pelas setas, fora da faixa
+  if(diffM(fim, ui.mes) > 0) fim = ui.mes;
+  const curto = v => { if(discreto.on) return '•••'; const a = Math.abs(v), s = v<0 ? '−' : '';
+    return s + (a>=1000 ? (a/1000).toLocaleString('pt-BR', {maximumFractionDigits:1}) + ' mil' : Math.round(a).toLocaleString('pt-BR')); };
+  const chips = [];
+  for(let k=ini; diffM(k, fim)>=0; k=addM(k,1)){
+    const c = calc(k), vazio = !(c.renda || c.entradas || c.saidas || c.guardado);
+    const ano = k.slice(0,4)!==hoje.slice(0,4) ? '/'+k.slice(2,4) : '';
+    chips.push(`<button class="mes-chip ${k===ui.mes?'on':''} ${diffM(hoje,k)>0?'fut':''}" data-act="irMes" data-m="${k}" aria-pressed="${k===ui.mes}" aria-label="${mLabel(k)}: sobra ${vazio ? 'sem dados' : fmt(c.sobra)}">
+      <span>${mLabel(k,true)}${ano}</span><b class="${!vazio && c.sobra<0 ? 'neg' : ''}">${vazio ? '—' : curto(c.sobra)}</b></button>`);
+  }
+  return `<div class="meses" id="meses">${chips.join('')}</div>`;
+}
+
 function vInicio(){
   const c = calc(ui.mes);
-  let h = avisos() + vHero(c);
+  let h = vMeses() + avisos() + vHero(c);
   if(ui.mes===thisMonth()) h += vCarteira();
   h += `<div style="margin-top:22px">${vCategorias(c)}${vHistorico()}</div>`;
   // lista do mês; a busca e os filtros só aparecem pela lupa
@@ -211,7 +234,32 @@ export function renderLista(){
     }
   });
   if(itens.length > MAX_LISTA) h += `<p class="note">Mostrando ${MAX_LISTA} de ${itens.length}. Refine a busca.</p>`;
+  if(!filtrando){
+    const deFora = S.gastos.filter(g=>g.meio==='cartao' && g.data.slice(0,7)!==ui.mes && faturaMonth(g.data, cartaoOf(g.cartao))===ui.mes);
+    if(deFora.length){
+      const meses = [...new Set(deFora.map(g=>g.data.slice(0,7)))].sort().map(k=>mLabel(k).replace(/ de \d{4}$/,'')).join(' e ');
+      h += `<p class="note fora">As faturas deste mês têm <b>${fmt(sum(deFora))}</b> em compras de ${meses}. Toque no cartão para ver.</p>`;
+    }
+  }
   el.innerHTML = h;
+}
+
+// compras e fixos que caem na fatura do cartão `id` que vence no mês `m` (janela aberta ao tocar no cartão)
+export function vFatura(id, m){
+  const k = S.cartoes.find(x=>x.id===id); if(!k) return '';
+  const p = faturaPeriodo(m, k), mesmo = c => cartaoOf(c)===k;
+  const compras = S.gastos.filter(g=>g.meio==='cartao' && mesmo(g.cartao) && faturaMonth(g.data, k)===m).sort((a,b)=>b.data.localeCompare(a.data) || b.criado-a.criado);
+  const fixos = S.recorrentes.filter(r=>r.meio==='cartao' && mesmo(r.cartao) && recInMonth(r, m));
+  const total = sum(compras) + sum(fixos, r=>r.valor), paga = (k.pagas||[]).includes(m);
+  let h = `<h2>${esc(k.nome)} · vence ${dLabel(vencimentoData(m, k))}${paga ? ' <span class="tag pos">paga</span>' : ''}</h2>
+    <p class="note" style="margin-top:2px">Compras de ${dLabel(p.ini)} a ${dLabel(p.fim)}</p><div class="fat-lista">`;
+  if(!compras.length && !fixos.length) h += `<div class="empty">Nenhuma compra nesta fatura.</div>`;
+  compras.forEach(g=>{ const ct = catOf(g.cat);
+    h += `<div class="row"><div class="lanc"><span class="ico" style="background:${ct.c}">${inicial(ct.n)}</span><div class="t"><div>${esc(g.desc||ct.n)}</div><small>${dLabel(g.data)}/${g.data.slice(2,4)}, ${esc(ct.n)}</small></div></div><span style="white-space:nowrap"><b>${fmt(g.valor)}</b><button class="x" data-act="editL" data-k="gasto" data-id="${esc(g.id)}" aria-label="Editar">✎&#xFE0E;</button></span></div>`; });
+  fixos.forEach(r=>{ const ct = catOf(r.cat), info = recInMonth(r, m);
+    h += `<div class="row"><div class="lanc"><span class="ico" style="background:${ct.c}">${inicial(ct.n)}</span><div class="t"><div>${esc(r.nome)}</div><small>${r.tipo==='parcela' ? `parcela ${info.n}/${r.parcelas}` : 'fixo mensal'}</small></div></div><b>${fmt(r.valor)}</b></div>`; });
+  return h + `</div><div class="row fat-total"><b>Total</b><b>${fmt(total)}</b></div>
+    <button class="btn sec" data-act="fecharDlg">Fechar</button>`;
 }
 
 /* ---------- Lançar ---------- */
