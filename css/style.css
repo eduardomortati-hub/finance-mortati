@@ -201,7 +201,7 @@ body.auth{padding-bottom:24px}
 .ccard .bottom b{font-weight:600}
 .ccard[data-act]{cursor:pointer;transition:transform .15s}
 .ccard[data-act]:active{transform:scale(.985)}
-.row.clicavel{cursor:pointer}
+.row.clicavel,.cat.clicavel{cursor:pointer}
 .note.fora{margin:8px 2px 4px;padding-top:10px;border-top:1px solid var(--line)}
 .fat-lista{margin-top:8px;max-height:52dvh;overflow-y:auto}
 .fat-total{border-top:1px solid var(--line);border-bottom:0;margin-top:2px;padding-top:12px}

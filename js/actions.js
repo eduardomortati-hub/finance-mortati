@@ -2,7 +2,7 @@ import { S, save, setS, trocaS, catOf, cartaoOf, cartoesAtivos } from './store.j
 import * as nuvem from './nuvem.js';
 import { empty } from './model.js';
 import { faturaMonth, saldoConta, contasAtivas } from './finance.js';
-import { ui, render, totalParcelado, statusTexto, vFatura, vExtrato } from './views.js';
+import { ui, render, totalParcelado, statusTexto, vFatura, vExtrato, vCategoria } from './views.js';
 import { ask } from './modal.js';
 import { cifrar } from './crypto.js';
 import { CATS, CORES_CARTAO } from './config.js';
@@ -96,6 +96,7 @@ export const A = {
     render();
   },
   verFatura(d){ abrirJanela({tipo:'fatura', id:d.id, m:d.m}, vFatura(d.id, d.m)); },
+  verCat(d){ abrirJanela({tipo:'cat', id:d.id, m:d.m}, vCategoria(d.id, d.m)); },
   fecharDlg(){ const dlg = $('#dlg'); if(dlg.open) dlg.close(); },
   irFixo(d){ A.fecharDlg(); ui.tab = 'fixos'; ui.abertos.add('addR'); A.editR(d); },
   editL(d){
@@ -420,7 +421,7 @@ export const A = {
   }
 };
 
-// janela de fatura/extrato: fica atualizada enquanto aberta (ui.dlg) e some do estado ao fechar
+// janela de fatura/extrato/categoria: fica atualizada enquanto aberta (ui.dlg) e some do estado ao fechar
 function abrirJanela(qual, html){
   const dlg = $('#dlg'); ui.dlg = qual; dlg.innerHTML = html;
   dlg.onclick = dlg.onkeydown = dlg.oncancel = null;

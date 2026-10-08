@@ -2,7 +2,7 @@
 // Só lida com arquivos do próprio app — os dados financeiros ficam no localStorage e nunca passam por aqui.
 // VERSION é um hash dos arquivos, gerado por tools/stamp-sw.mjs no pre-commit: qualquer mudança vira versão nova
 // e o app instalado oferece a atualização. Ao criar um arquivo novo, inclua-o em FILES.
-const VERSION = '73ba8014362e';
+const VERSION = '50595783df32';
 const CACHE = 'meucaixa-' + VERSION;
 const FILES = [
   './',

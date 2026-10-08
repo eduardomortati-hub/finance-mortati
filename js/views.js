@@ -7,7 +7,7 @@ import { $, esc, fmt, todayISO, thisMonth, addM, diffM, mLabel, dLabel, sum, nor
 // estado da interface (não é salvo)
 export const ui = {tab:'inicio', mes:thisMonth(), draft:{tipo:'gasto', cat:null, meio:'cartao', parcelado:false},
   editId:null, editG:null, contaEd:null, cartaoEd:null, cartaoCor:null, invEd:null, invNovoTipo:'cdb', invNovoJa:true, busca:{q:'', cat:'', meio:''}, buscaAberta:false,
-  dlg:null,   // janela aberta que acompanha as mudanças: {tipo:'fatura'|'conta', id, m}
+  dlg:null,   // janela aberta que acompanha as mudanças: {tipo:'fatura'|'conta'|'cat', id, m}
   abertos:new Set(), tela:null, authMsg:''};   // tela: entrar | criar | esqueci | novaSenha | aviso (antes de entrar no app)   // seções recolhíveis que a pessoa abriu (data-fold)
 
 const ymBR = k => mLabel(k,true)+'/'+k.slice(2,4);
@@ -44,7 +44,7 @@ export function render(){
   }
   if(ui.tab==='lancar'){ const v=$('#gValor'); if(v && !v.value) setTimeout(()=>v.focus(),50); }
   const dlg = $('#dlg');
-  if(dlg.open && ui.dlg) dlg.innerHTML = ui.dlg.tipo==='fatura' ? vFatura(ui.dlg.id, ui.dlg.m) : vExtrato(ui.dlg.id);
+  if(dlg.open && ui.dlg) dlg.innerHTML = ui.dlg.tipo==='fatura' ? vFatura(ui.dlg.id, ui.dlg.m) : ui.dlg.tipo==='cat' ? vCategoria(ui.dlg.id, ui.dlg.m) : vExtrato(ui.dlg.id);
   if(ui.tab!==lastTab) window.scrollTo(0,0);   // só volta ao topo ao trocar de aba
   lastTab = ui.tab;
 }
@@ -164,7 +164,7 @@ function vCategorias(c){
     if(lim){ const p=v/lim; cor = p>1?'var(--neg)':p>.8?'var(--amb)':ct.c; extra = `<div class="sm mut" style="text-align:right">de ${fmt(lim)}${p>1?' <span class="neg">estourou</span>':p>.8?' <span class="amb">perto do limite</span>':''}</div>`; }
     if(p0>0){ const pct = Math.round((v-p0)/p0*100); if(pct) delta = `<span class="delta ${pct>0?'neg':'pos'}">${pct>0?'▲':'▼'} ${Math.abs(pct)}% vs ${antLbl}</span>`; }
     const w = lim ? Math.min(100, v/lim*100) : v/maxV*100;
-    h += `<div class="cat"><div class="top"><span>${dot(ct.c)}${esc(ct.n)}${delta}</span><span><b>${fmt(v)}</b>${extra}</span></div><div class="bar"><i style="width:${w}%;background:${cor}"></i></div></div>`;
+    h += `<div class="cat clicavel" role="button" tabindex="0" data-act="verCat" data-id="${esc(id)}" data-m="${ui.mes}" aria-label="Ver os gastos de ${esc(ct.n)}"><div class="top"><span>${dot(ct.c)}${esc(ct.n)}${delta}</span><span><b>${fmt(v)}</b>${extra}</span></div><div class="bar"><i style="width:${w}%;background:${cor}"></i></div></div>`;
   });
   return fold('cats', 'Para onde foi', cats.length ? fmt(sum(cats, x=>x[1])) : '', h);
 }
@@ -327,6 +327,24 @@ export function vFatura(id, m){
   fixos.forEach(r=>{ const ct = catOf(r.cat), info = recInMonth(r, m);
     h += `<div class="row"><div class="lanc"><span class="ico" style="background:${ct.c}">${inicial(ct.n)}</span><div class="t"><div>${esc(r.nome)}</div><small>${r.tipo==='parcela' ? `parcela ${info.n}/${r.parcelas}` : 'fixo mensal'} · muda em Fixos</small></div></div><span style="white-space:nowrap"><b>${fmt(r.valor)}</b><button class="x" data-act="irFixo" data-id="${esc(r.id)}" aria-label="Editar, encerrar ou apagar em Fixos">✎&#xFE0E;</button></span></div>`; });
   return h + `</div><div class="row fat-total"><b>Total</b><b>${fmt(total)}</b></div>
+    <button class="btn sec" data-act="fecharDlg">Fechar</button>`;
+}
+
+// gastos e fixos da categoria `id` no mês `m`, do maior para o menor (janela aberta ao tocar na categoria em "Para onde foi")
+export function vCategoria(id, m){
+  const ct = catOf(id);
+  const itens = [
+    ...S.gastos.filter(g=>g.cat===id && g.data.slice(0,7)===m).map(g=>({g, valor:g.valor})),
+    ...S.recorrentes.filter(r=>r.cat===id).map(r=>({r, info:recInMonth(r, m), valor:r.valor})).filter(x=>x.info)
+  ].sort((a,b)=>b.valor-a.valor);
+  let h = `<h2>${esc(ct.n)} · ${mLabel(m)}</h2>
+    <p class="note" style="margin-top:2px">Do maior para o menor</p><div class="fat-lista">`;
+  if(!itens.length) h += `<div class="empty">Nenhum gasto nesta categoria no mês.</div>`;
+  itens.forEach(({g, r, info})=>{
+    if(g) h += `<div class="row"><div class="lanc"><span class="ico" style="background:${ct.c}">${inicial(ct.n)}</span><div class="t"><div>${esc(g.desc||ct.n)}</div><small>${dLabel(g.data)}/${g.data.slice(2,4)}, ${esc(meioLabel(g))}</small></div></div><span style="white-space:nowrap"><b>${fmt(g.valor)}</b><button class="x" data-act="editL" data-k="gasto" data-id="${esc(g.id)}" aria-label="Editar">✎&#xFE0E;</button><button class="x" data-act="delL" data-k="gasto" data-id="${esc(g.id)}" aria-label="Apagar">×</button></span></div>`;
+    else h += `<div class="row"><div class="lanc"><span class="ico" style="background:${ct.c}">${inicial(ct.n)}</span><div class="t"><div>${esc(r.nome)}</div><small>${r.tipo==='parcela' ? `parcela ${info.n}/${r.parcelas}` : 'fixo mensal'} · muda em Fixos</small></div></div><span style="white-space:nowrap"><b>${fmt(r.valor)}</b><button class="x" data-act="irFixo" data-id="${esc(r.id)}" aria-label="Editar, encerrar ou apagar em Fixos">✎&#xFE0E;</button></span></div>`;
+  });
+  return h + `</div><div class="row fat-total"><b>Total</b><b>${fmt(sum(itens, x=>x.valor))}</b></div>
     <button class="btn sec" data-act="fecharDlg">Fechar</button>`;
 }
 

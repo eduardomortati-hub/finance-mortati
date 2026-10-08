@@ -947,3 +947,19 @@ test('fatura: apagar compra pela lista do cartão, com desfazer, e ir ao fixo da
   assert.equal(await page.inputValue('#rNome'), 'TV');
   await ctx.close();
 });
+
+test('para onde foi: tocar na categoria mostra os gastos dela, do maior para o menor', async()=>{
+  const {page, ctx} = await abrir(estado({
+    gastos:[{id:'g1', data:ym(0)+'-02', valor:30, cat:'mercado', meio:'pix', desc:'Pão', criado:1},
+            {id:'g2', data:ym(0)+'-03', valor:250, cat:'mercado', meio:'pix', desc:'Feira grande', criado:2},
+            {id:'g3', data:ym(0)+'-04', valor:999, cat:'compras', meio:'pix', desc:'Outra categoria', criado:3}],
+    recorrentes:[{id:'r1', nome:'Clube', valor:100, tipo:'fixo', meio:'pix', inicio:ym(0), cat:'mercado'}]}));
+  await page.click('[data-fold="cats"] summary');
+  await page.click('.cat[data-act="verCat"][data-id="mercado"]'); await page.waitForSelector('#dlg[open]');
+  const nomes = await page.$$eval('#dlg .fat-lista .row .t > div', els=>els.map(e=>e.textContent));
+  assert.deepEqual(nomes, ['Feira grande', 'Clube', 'Pão']);
+  assert.match(await page.textContent('#dlg .fat-total'), /380,00/);
+  await page.click('#dlg [data-act="delL"][data-id="g1"]');
+  assert.match(await page.textContent('#dlg .fat-total'), /350,00/, 'o total atualiza na hora');
+  await ctx.close();
+});
